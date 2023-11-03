@@ -12,7 +12,7 @@ use std::sync::{Arc, RwLock};
 
 #[allow(non_snake_case)]
 #[derive(Clone, Debug, PartialEq)]
-enum NodeColor {
+pub enum NodeColor {
     Red,
     Black,
 }
@@ -28,26 +28,26 @@ pub struct Orderbook<T: Ord + Display + Debug + Clone + Copy> {
     ask_tree: Arc<RwLock<RBTree<T>>>,
 }
 
-type LimitNode<T> = Rc<RefCell<Node<T>>>;
-type LimitNodePtr<T> = Option<LimitNode<T>>;
+pub type LimitNode<T> = Rc<RefCell<Node<T>>>;
+pub type LimitNodePtr<T> = Option<LimitNode<T>>;
 
 #[derive(Clone)]
 pub struct Node<T> {
-    color: NodeColor,
-    price: T,
-    size: u32,
-    value_sum: Fq,
-    parent: LimitNodePtr<T>,
-    left: LimitNodePtr<T>,
-    right: LimitNodePtr<T>,
-    orders: HashMap<u32, HashMap<Commitment, Order>>,
+    pub color: NodeColor,
+    pub price: Fq,
+    pub size: u32,
+    pub value_sum: Fq,
+    pub parent: LimitNodePtr<T>,
+    pub left: LimitNodePtr<T>,
+    pub right: LimitNodePtr<T>,
+    pub orders: HashMap<u32, HashMap<Commitment, Order>>,
 }
 
 impl<T> Node<T>
 where
     T: Debug + Ord + Display + Copy,
 {
-    pub fn new(price: T, data: Data) -> LimitNodePtr<T> {
+    pub fn new(price: Fq, data: Data) -> LimitNodePtr<T> {
         Some(Rc::new(RefCell::new(Node {
             color: NodeColor::Red,
             price: price,
@@ -92,8 +92,8 @@ enum Direction {
 
 #[derive(Clone, Debug)]
 pub struct RBTree<T: Ord + Display + Debug + Copy> {
-    root: LimitNodePtr<T>,
-    count: u32,
+    pub root: LimitNodePtr<T>,
+    pub count: u32,
 }
 
 impl<T> RBTree<T>
@@ -116,7 +116,7 @@ where
     }
 
     // 1- insert a node to the red-black tree
-    pub fn insert(&mut self, price: T, data: Data) {
+    pub fn insert(&mut self, price: Fq, data: Data) {
         // check if price level already in tree --
         // if not, add a new node at that price level
         // if yes insert <data.raw_order_commitment, data.raw_order> into the node hashmap
@@ -143,7 +143,7 @@ where
     fn insert_node(
         &mut self,
         tree: LimitNodePtr<T>,
-        price: T,
+        price: Fq,
         data: Data,
     ) -> (LimitNodePtr<T>, LimitNode<T>) {
         match tree {
@@ -401,7 +401,7 @@ where
         cur_parent.borrow_mut().parent = left_child.clone();
     }
 
-    pub fn search(&self, key: T, data: Data) -> LimitNodePtr<T> {
+    pub fn search(&self, key: Fq, data: Data) -> LimitNodePtr<T> {
         let dummy = Node::<T>::new(key, data).unwrap().borrow().clone();
         self.search_node(&self.root, &dummy)
     }
@@ -427,7 +427,7 @@ where
     // 2- delete a node from the red-black tree
     // the whole node is deleted if  there is only one order remaining in the hashmap
     // else only the order is removed from the hashmap
-    pub fn delete(&mut self, key: T, data: Data) {
+    pub fn delete(&mut self, key: Fq, data: Data) {
         let z = self.search(key, data.clone());
         if z.is_none() {
             println!("Key not found");
@@ -511,7 +511,13 @@ where
             }
             self.count -= 1;
         } else {
-            if let Some(inner_map) = z.as_ref().unwrap().borrow_mut().orders.get_mut(&data.pubkey) {
+            if let Some(inner_map) = z
+                .as_ref()
+                .unwrap()
+                .borrow_mut()
+                .orders
+                .get_mut(&data.pubkey)
+            {
                 inner_map.remove(&data.raw_order_commitment);
             }
             z.as_ref().unwrap().borrow_mut().size -= 1;
@@ -885,6 +891,3 @@ where
             .finish()
     }
 }
-
-
-
