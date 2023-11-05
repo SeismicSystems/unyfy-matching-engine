@@ -244,7 +244,7 @@ where
                                         let parent_tmp =
                                             node.read().await.parent.as_ref().unwrap().clone();
                                         node = parent_tmp;
-                                        self.rotate_left(node.clone());
+                                        self.rotate_left(node.clone()).await;
                                         parent = node.read().await.parent.as_ref().unwrap().clone();
                                     }
 
@@ -264,7 +264,7 @@ where
                                         .unwrap()
                                         .clone();
                                     // rotate parent right so that grandparent becomes right child
-                                    self.rotate_right(grandparent);
+                                    self.rotate_right(grandparent).await;
                                 }
                             }
                             Direction::Left => {
@@ -290,7 +290,7 @@ where
                                         let parent_tmp =
                                             node.read().await.parent.as_ref().unwrap().clone();
                                         node = parent_tmp;
-                                        self.rotate_right(node.clone());
+                                        self.rotate_right(node.clone()).await;
                                         parent = node.read().await.parent.as_ref().unwrap().clone();
                                     }
                                     parent.write().await.color = NodeColor::Black;
@@ -308,7 +308,7 @@ where
                                         .as_ref()
                                         .unwrap()
                                         .clone();
-                                    self.rotate_left(grandparent);
+                                    self.rotate_left(grandparent).await;
                                 }
                             }
                         }
@@ -520,7 +520,7 @@ where
                 y.as_ref().unwrap().write().await.color = u.as_ref().unwrap().read().await.color.clone();
             }
             if u_original_color == NodeColor::Black {
-                self.delete_fix(x.clone(), p.clone(), side);
+                self.delete_fix(x.clone(), p.clone(), side).await;
             }
             self.count -= 1;
         } else {
@@ -566,7 +566,7 @@ where
                             s.as_ref().unwrap().write().await.color = NodeColor::Black;
                             //cur_p.as_ref().unwrap().borrow_mut().color = NodeColor::Red;
                             cur_p.as_ref().unwrap().write().await.color = NodeColor::Red;
-                            self.rotate_left(cur_p.as_ref().unwrap().clone());
+                            self.rotate_left(cur_p.as_ref().unwrap().clone()).await;
                           // s = cur_p.as_ref().unwrap().borrow().right.clone();
                           s = cur_p.as_ref().unwrap().read().await.right.clone();
                         }
@@ -611,7 +611,7 @@ where
                                     s_left.as_ref().unwrap().write().await.color = NodeColor::Black;
                                    // s.as_ref().unwrap().borrow_mut().color = NodeColor::Red;
                                     s.as_ref().unwrap().write().await.color = NodeColor::Red;
-                                    self.rotate_right(s.unwrap());
+                                    self.rotate_right(s.unwrap()).await;
                                     // s = cur_p.as_ref().unwrap().borrow().right.clone();
                                     s = cur_p.as_ref().unwrap().read().await.right.clone();
                                 }
@@ -622,7 +622,7 @@ where
                             if s_right.is_some() {
                                 s_right.as_ref().unwrap().write().await.color = NodeColor::Black;
                             }
-                            self.rotate_left(cur_p.as_ref().unwrap().clone());
+                            self.rotate_left(cur_p.as_ref().unwrap().clone()).await;
                             is_root = true;
                         }
                     }
@@ -637,7 +637,7 @@ where
                             // rotate parent node right
                             s.as_ref().unwrap().write().await.color = NodeColor::Black;
                             cur_p.as_ref().unwrap().write().await.color = NodeColor::Red;
-                            self.rotate_right(cur_p.as_ref().unwrap().clone());
+                            self.rotate_right(cur_p.as_ref().unwrap().clone()).await;
                             s = cur_p.as_ref().unwrap().read().await.left.clone();
                         }
                         let s_left = s.as_ref().unwrap().read().await.clone().left.clone();
@@ -673,7 +673,7 @@ where
                                 if s_left.is_some() {
                                     s_left.as_ref().unwrap().write().await.color = NodeColor::Black;
                                     s.as_ref().unwrap().write().await.color = NodeColor::Red;
-                                    self.rotate_left(s.unwrap());
+                                    self.rotate_left(s.unwrap()).await;
                                     s = cur_p.as_ref().unwrap().read().await.left.clone();
                                 }
                             }
@@ -683,7 +683,7 @@ where
                             if s_left.is_some() {
                                 s_left.as_ref().unwrap().write().await.color = NodeColor::Black;
                             }
-                            self.rotate_right(cur_p.as_ref().unwrap().clone());
+                            self.rotate_right(cur_p.as_ref().unwrap().clone()).await;
                             is_root = true;
                         }
                     }
