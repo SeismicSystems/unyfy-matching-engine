@@ -8,7 +8,9 @@ use std::sync::RwLock;
 use crate::raw_order::Order;
 use std::fmt::Display;
 
-pub fn match_bid<T>(order: Order, ask_tree: Arc<RwLock<RBTree<T>>>) -> Option<Vec<Order>> where T: Ord + Clone + Debug + Display + Copy{
+// TODO -- insert the order
+
+pub async fn match_bid<T>(order: Order, ask_tree: Arc<RwLock<RBTree<T>>>) -> Option<Vec<Order>> where T: Ord + Clone + Debug + Display + Copy{
     let three = Fq::from(3u32);
     let volume = order.s.v*order.s.p;
     let mut target_volume = three*volume;
@@ -64,7 +66,7 @@ pub fn match_bid<T>(order: Order, ask_tree: Arc<RwLock<RBTree<T>>>) -> Option<Ve
 
 }
 
-pub fn match_ask<T>(order: Order, bid_tree: Arc<RwLock<RBTree<T>>>) -> Option<Vec<Order>> where T: Ord + Clone + Debug + Display + Copy{
+async fn match_ask<T>(order: Order, bid_tree: Arc<RwLock<RBTree<T>>>) -> Option<Vec<Order>> where T: Ord + Clone + Debug + Display + Copy{
     let three = Fq::from(3u32);
     let volume = order.s.v*order.s.p;
     let mut target_volume = three*volume;
@@ -115,6 +117,7 @@ pub fn match_ask<T>(order: Order, bid_tree: Arc<RwLock<RBTree<T>>>) -> Option<Ve
         Some(matched_orders)
     }
     else{
+        println!("No match!");
         None
     }
 
@@ -129,11 +132,11 @@ pub fn inorder_traverse<T>(tree: &RBTree<T>)->Vec<Node<T>> where T: Ord + Clone 
 
 }
 
-pub fn inorder<T>(tree: &LimitNodePtr<T>, result: &mut Vec<Node<T>>) where T: Ord + Clone + Debug + Display + Copy{
+pub async fn inorder<T>(tree: &LimitNodePtr<T>, result: &mut Vec<Node<T>>) where T: Ord + Clone + Debug + Display + Copy{
         if let Some(node) = tree {
-            inorder(&node.borrow().left, result);
-            result.push(node.borrow().clone());
-            inorder(&node.borrow().left, result);
+            inorder(&node.read().await.left, result);
+            result.push(node.read().await.clone());
+            inorder(&node.read().await.left, result);
         }
 
 }
