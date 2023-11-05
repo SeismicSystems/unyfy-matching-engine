@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use crate::raw_order::Order;
 use std::fmt::Display;
+use async_recursion::async_recursion;
 
 // TODO -- insert the order
 
@@ -16,7 +17,7 @@ pub async fn match_bid<T>(order: Order, ask_tree: Arc<RwLock<RBTree<T>>>) -> Opt
     let mut target_volume = three*volume;
     let opposite_side = ask_tree.read().unwrap();
     
-    let ask_tree: Vec<Node<T>> = inorder_traverse(&opposite_side);
+    let ask_tree: Vec<Node<T>> = inorder_traverse(&opposite_side).await;
 
     let mut matched_orders: Vec<Order> = Vec::new();
 
@@ -72,7 +73,7 @@ async fn match_ask<T>(order: Order, bid_tree: Arc<RwLock<RBTree<T>>>) -> Option<
     let mut target_volume = three*volume;
     let opposite_side = bid_tree.read().unwrap();
     
-    let bid_tree: Vec<Node<T>> = inorder_traverse(&opposite_side);
+    let bid_tree: Vec<Node<T>> = inorder_traverse(&opposite_side).await;
 
     let mut matched_orders: Vec<Order> = Vec::new();
 
@@ -125,18 +126,19 @@ async fn match_ask<T>(order: Order, bid_tree: Arc<RwLock<RBTree<T>>>) -> Option<
 
 
 
-pub fn inorder_traverse<T>(tree: &RBTree<T>)->Vec<Node<T>> where T: Ord + Clone + Debug + Display + Copy{
+pub async fn inorder_traverse<T>(tree: &RBTree<T>)->Vec<Node<T>> where T: Ord + Clone + Debug + Display + Copy{
     let mut result: Vec<Node<T>> = Vec::new();
-    inorder(&tree.root, &mut result);
+    inorder(&tree.root, &mut result).await;
     result
 
 }
 
+#[async_recursion]
 pub async fn inorder<T>(tree: &LimitNodePtr<T>, result: &mut Vec<Node<T>>) where T: Ord + Clone + Debug + Display + Copy{
         if let Some(node) = tree {
-            inorder(&node.read().await.left, result);
+            inorder(&node.read().await.left, result).await;
             result.push(node.read().await.clone());
-            inorder(&node.read().await.left, result);
+            inorder(&node.read().await.left, result).await;
         }
 
 }
