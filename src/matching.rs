@@ -4,7 +4,7 @@ use crate::models::RBTree;
 use crate::models::{Node,LimitNodePtr};
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::sync::RwLock;
+use tokio::sync::RwLock;
 use crate::raw_order::Order;
 use std::fmt::Display;
 use async_recursion::async_recursion;
@@ -15,7 +15,7 @@ pub async fn match_bid<T>(order: Order, ask_tree: Arc<RwLock<RBTree<T>>>) -> Opt
     let three = Fq::from(3u32);
     let volume = order.s.v*order.s.p;
     let mut target_volume = three*volume;
-    let opposite_side = ask_tree.read().unwrap();
+    let opposite_side = ask_tree.read().await;
     
     let ask_tree: Vec<Node<T>> = inorder_traverse(&opposite_side).await;
 
@@ -67,11 +67,11 @@ pub async fn match_bid<T>(order: Order, ask_tree: Arc<RwLock<RBTree<T>>>) -> Opt
 
 }
 
-async fn match_ask<T>(order: Order, bid_tree: Arc<RwLock<RBTree<T>>>) -> Option<Vec<Order>> where T: Ord + Clone + Debug + Display + Copy{
+pub async fn match_ask<T>(order: Order, bid_tree: Arc<RwLock<RBTree<T>>>) -> Option<Vec<Order>> where T: Ord + Clone + Debug + Display + Copy{
     let three = Fq::from(3u32);
     let volume = order.s.v*order.s.p;
     let mut target_volume = three*volume;
-    let opposite_side = bid_tree.read().unwrap();
+    let opposite_side = bid_tree.read().await;
     
     let bid_tree: Vec<Node<T>> = inorder_traverse(&opposite_side).await;
 

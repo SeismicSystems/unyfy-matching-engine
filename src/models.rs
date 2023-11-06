@@ -2,19 +2,19 @@
 
 use crate::raw_order::*;
 use ark_bn254::Fr as Fq;
-use std::cell::RefCell;
+
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::mem::replace;
-use std::rc::Rc;
+
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::sync::Mutex;
-use std::borrow::BorrowMut;
-use tokio::runtime::Runtime;
+
+use ethnum::U256;
+
 use async_recursion::async_recursion;
 #[allow(non_snake_case)]
 #[derive(Clone, Debug, PartialEq)]
@@ -24,7 +24,7 @@ pub enum NodeColor {
 }
 #[derive(Debug, Clone)]
 pub struct Data {
-    pub pubkey: u32,
+    pub pubkey: U256,
     pub raw_order: Order,
     pub raw_order_commitment: Commitment,
 }
@@ -46,7 +46,7 @@ pub struct Node<T> {
     pub parent: LimitNodePtr<T>,
     pub left: LimitNodePtr<T>,
     pub right: LimitNodePtr<T>,
-    pub orders: HashMap<u32, HashMap<Commitment, Order>>,
+    pub orders: HashMap<U256, HashMap<Commitment, Order>>,
 }
 
 impl<T> Node<T>
