@@ -70,7 +70,7 @@ where
 
 pub async fn match_ask<T>(order: Order, bid_tree: Arc<RwLock<RBTree<T>>>) -> Option<Vec<Order>>
 where
-    T: Ord + Clone + Debug  + Copy,
+    T: Ord + Clone + Debug + Copy,
 {
     let three = Fq::from(3);
     let volume = order.s.v * order.s.p;
@@ -136,7 +136,7 @@ where
 #[async_recursion]
 pub async fn inorder<T>(tree: &LimitNodePtr<T>, result: &mut Vec<Node<T>>)
 where
-    T: Ord + Clone + Debug+ Copy,
+    T: Ord + Clone + Debug + Copy,
 {
     if let Some(node) = tree {
         inorder(&node.read().await.left, result).await;

@@ -192,13 +192,13 @@ async fn handle_websocket_messages(
     } */
 }
 
-async fn hash_three_values(a: Fq, b: Fq, c: Fq) -> Fq  {
+async fn hash_three_values(a: Fq, b: Fq, c: Fq) -> Fq {
     let mut hasher = Sha256::new();
     hasher.update(a.to_bytes());
     hasher.update(b.to_bytes());
     hasher.update(c.to_bytes());
     let hash = hasher.finalize();
-    let hash_array:[u8; 32] = hash.into();
+    let hash_array: [u8; 32] = hash.into();
     Fq::from_bytes(&hash_array).unwrap()
 }
 
