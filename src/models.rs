@@ -494,6 +494,28 @@ where
         }
     }
 
+    pub async fn search_exact_order(&self, data: Data) -> Option<LimitNodePtr<T>> {
+        let dummy = Node::<T>::new(data.raw_order.s.p, data.clone())
+            .unwrap()
+            .write()
+            .await
+            .clone();
+        let node = self.search_node(&self.root, &dummy).await;
+        if node.is_some() {
+            let node_orders = node.as_ref().unwrap().read().await.orders.clone();
+            if node_orders.contains_key(&data.pubkey) {
+                if node_orders
+                    .get(&data.pubkey)
+                    .unwrap()
+                    .contains_key(&data.raw_order_commitment)
+                {
+                    return Some(node.clone());
+                }
+            }
+        }
+        None
+    }
+
     // 2- delete a node from the red-black tree
     // the whole node is deleted if  there is only one order remaining in the hashmap
     // else only the order is removed from the hashmap

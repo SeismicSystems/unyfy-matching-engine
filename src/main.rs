@@ -144,8 +144,8 @@ async fn handle_websocket_messages(
                 // Assuming 'action' field determines the kind of the message
                 if json_msg["action"] == "sendorder" {
                     println!("Hi!");
-                    let side = json_msg["data"]["transparent"]["side"].as_u64().unwrap();
-
+                    let side = json_msg["data"]["transparent"]["side"].as_str().unwrap();
+                    let side_num = side.to_string().parse::<u64>().unwrap();
                     let price_str = json_msg["data"]["shielded"]["price"].as_str().unwrap();
                     let volume_str = json_msg["data"]["shielded"]["volume"].as_str().unwrap();
                     let access_key_str =
@@ -184,7 +184,7 @@ async fn handle_websocket_messages(
 
                     let order = Order {
                         t: TransparentStructure {
-                            phi: Fq::from(side),
+                            phi: Fq::from(side_num),
                             chi: token.to_string(),
                             d: denomination.to_string(),
                         },
@@ -210,7 +210,7 @@ async fn handle_websocket_messages(
 
                     println!("We here!");
 
-                    if side == 0 {
+                    if side_num == 0 {
                         bid_tree.write().await.insert(order.s.p, data).await;
                         bid_tree.read().await.print_inorder().await;
                     } else {
@@ -260,6 +260,152 @@ async fn handle_websocket_messages(
                     sender.send(message).await.unwrap();
 
                     // sender.
+                } else if json_msg["action"] == "getcrossedorders" {
+                    let side = json_msg["data"]["transparent"]["side"].as_str().unwrap();
+                    let side_num = side.to_string().parse::<u64>().unwrap();
+                    let price_str = json_msg["data"]["shielded"]["price"].as_str().unwrap();
+                    let volume_str = json_msg["data"]["shielded"]["volume"].as_str().unwrap();
+                    let access_key_str =
+                        json_msg["data"]["shielded"]["accessKey"].as_str().unwrap();
+                    // Parse the strings into BigUint, assuming decimal format
+                    let price = BigUint::parse_bytes(price_str.as_bytes(), 10).unwrap();
+                    let volume = BigUint::parse_bytes(volume_str.as_bytes(), 10).unwrap();
+                    let access_key = BigUint::parse_bytes(access_key_str.as_bytes(), 10).unwrap();
+
+                    let price_bytes_vec = price.to_bytes_le();
+                    let volume_bytes_vec = volume.to_bytes_le();
+                    let access_key_bytes_vec = access_key.to_bytes_le();
+
+                    // Convert BigUint to [u8; 32] in little-endian format
+                    let mut price_bytes = [0u8; 32];
+                    let mut volume_bytes = [0u8; 32];
+                    let mut access_key_bytes = [0u8; 32];
+                    for (i, byte) in price_bytes_vec.iter().enumerate() {
+                        price_bytes[i] = *byte;
+                    }
+
+                    for (i, byte) in volume_bytes_vec.iter().enumerate() {
+                        volume_bytes[i] = *byte;
+                    }
+
+                    for (i, byte) in access_key_bytes_vec.iter().enumerate() {
+                        access_key_bytes[i] = *byte;
+                    }
+
+                    let token = json_msg["data"]["transparent"]["token"].as_str().unwrap();
+                    let denomination = json_msg["data"]["transparent"]["denomination"]
+                        .as_str()
+                        .unwrap();
+
+                    // Create the order
+
+                    let order = Order {
+                        t: TransparentStructure {
+                            phi: Fq::from(side_num),
+                            chi: token.to_string(),
+                            d: denomination.to_string(),
+                        },
+                        s: ShieldedStructure {
+                            p: Fq::from_bytes(&price_bytes).unwrap(),
+                            v: Fq::from_bytes(&volume_bytes).unwrap(),
+                            alpha: Fq::from_bytes(&access_key_bytes).unwrap(),
+                        },
+                    };
+
+                    let hash = hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
+
+                    let commitment = Commitment {
+                        public: order.t.clone(),
+                        private: hash,
+                    };
+
+                    let data = Data {
+                        pubkey: U256::from_str_hex("0x0").unwrap(), // example pubkey, replace with actual -- TODO
+                        raw_order: order.clone(),
+                        raw_order_commitment: commitment.clone(),
+                    };
+
+                    let mut found: bool;
+
+                    let mut matches: Option<Vec<Order>>;
+
+                    if side_num == 0 {
+                        match bid_tree.read().await.search_exact_order(data).await {
+                            Some(_) => found = true,
+                            None => found = false,
+                        }
+
+                        if found {
+                            matches =
+                                Some(match_bid(order.clone(), ask_tree.clone()).await.unwrap());
+                        } else {
+                            matches = None
+                        }
+                    } else {
+                        match ask_tree.read().await.search_exact_order(data).await {
+                            Some(_) => found = true,
+                            None => found = false,
+                        }
+
+                        if found {
+                            matches =
+                                Some(match_ask(order.clone(), bid_tree.clone()).await.unwrap());
+                        } else {
+                            matches = None
+                        }
+                    }
+                    let mut json_array = serde_json::Value::Array(Vec::new());
+                    match matches {
+                        Some(matches) => {
+                            for order in matches {
+                                let hash =
+                                    hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
+                                let order_json = json!({
+                                    "raw_order": {
+                                        "t": {
+                                            "phi": BigUint::from_bytes_le(&order.t.phi.to_bytes()).to_str_radix(10),
+                                            "chi": order.t.chi,
+                                            "d": order.t.d,
+                                        },
+                                        "s": {
+                                            "p": BigUint::from_bytes_le(&order.s.p.to_bytes()).to_str_radix(10),
+                                            "v": BigUint::from_bytes_le(&order.s.v.to_bytes()).to_str_radix(10),
+                                            "alpha": BigUint::from_bytes_le(&order.s.alpha.to_bytes()).to_str_radix(10),
+                                        },
+                                    },
+                                    "raw_order_commitment": {
+                                        "public": {
+                                            "phi": BigUint::from_bytes_le(&order.t.phi.to_bytes()).to_str_radix(10),
+                                            "chi": order.t.chi,
+                                            "d": order.t.d,
+                                        },
+                                        "private": BigUint::from_bytes_le(&hash.to_bytes()).to_str_radix(10),
+                                    },
+                                });
+                                json_array.as_array_mut().unwrap().push(order_json);
+                            }
+                        }
+                        None => {}
+                    }
+
+                    // Construct the JSON payload
+                    let payload = json!({
+                        "action": "getorderbook",
+                        "orderCommitment": {
+                            "transparent": {
+                                "side": side,
+                                "token": order.t.chi,
+                                "denomination": order.t.d
+                            },
+                            "shielded": BigUint::from_bytes_le(&commitment.private.to_bytes()).to_str_radix(10),
+                        },
+                        "data": {
+                            "orders": json_array,
+                        }
+                    });
+
+                    let message = Message::text(payload.to_string());
+                    sender.send(message).await.unwrap();
                 }
             }
         }
