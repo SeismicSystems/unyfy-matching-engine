@@ -173,6 +173,7 @@ async fn handle_websocket_messages(
         println!("{:?}", order_match);
     }
 
+    // sender.
     /*let (mut tx, mut rx) = websocket.split();
 
     while let Some(result) = rx.next().await {
@@ -197,9 +198,12 @@ async fn hash_three_values(a: Fq, b: Fq, c: Fq) -> Fq {
     hasher.update(a.to_bytes());
     hasher.update(b.to_bytes());
     hasher.update(c.to_bytes());
-    let hash = hasher.finalize();
-    let hash_array: [u8; 32] = hash.into();
-    Fq::from_bytes(&hash_array).unwrap()
+    let hash: [u8; 32] = hasher.finalize().into();
+    // println!("hash is: {:?} ", hash);
+    // let hash_array: [u8; 32] = hash.into();
+    let mut bytes = [0u8; 32];
+    bytes[0..30].copy_from_slice(&hash[0..30]);
+    Fq::from_bytes(&bytes).unwrap()
 }
 
 type SafeOrderbook = Arc<RwLock<Orderbook<Fq>>>;
