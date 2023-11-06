@@ -1,7 +1,8 @@
 #![allow(dead_code, unused_variables)]
 
 use crate::raw_order::*;
-use ark_bn254::Fr as Fq;
+// use ark_bn254::Fr as Fq;
+use halo2curves::bn256::Fr as Fq;
 
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -29,7 +30,7 @@ pub struct Data {
     pub raw_order_commitment: Commitment,
 }
 
-pub struct Orderbook<T: Ord + Display + Debug + Clone + Copy> {
+pub struct Orderbook<T: Ord + Debug + Clone + Copy> {
     pub bid_tree: Arc<RwLock<RBTree<T>>>,
     pub ask_tree: Arc<RwLock<RBTree<T>>>,
 }
@@ -51,7 +52,7 @@ pub struct Node<T> {
 
 impl<T> Node<T>
 where
-    T: Debug + Ord + Display + Copy,
+    T: Debug + Ord + Copy,
 {
     pub fn new(price: Fq, data: Data) -> LimitNodePtr<T> {
         Some(Arc::new(RwLock::new(Node {
@@ -75,7 +76,7 @@ where
 
 impl<T> fmt::Debug for Node<T>
 where
-    T: Debug + Ord + Display + Copy,
+    T: Debug + Ord + Copy,
 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Node")
@@ -97,14 +98,14 @@ enum Direction {
 }
 
 #[derive(Clone, Debug)]
-pub struct RBTree<T: Ord + Display + Debug + Copy> {
+pub struct RBTree<T: Ord + Debug + Copy> {
     pub root: LimitNodePtr<T>,
     pub count: u32,
 }
 
 impl<T> RBTree<T>
 where
-    T: Ord + Display + Debug + Clone + Copy,
+    T: Ord + Debug + Clone + Copy,
 {
     pub fn new() -> Self {
         RBTree {
@@ -122,7 +123,7 @@ where
     }
 
     // 1- insert a node to the red-black tree
-   pub async fn insert(&mut self, price: Fq, data: Data) {
+    pub async fn insert(&mut self, price: Fq, data: Data) {
         // check if price level already in tree --
         // if not, add a new node at that price level
         // if yes insert <data.raw_order_commitment, data.raw_order> into the node hashmap
@@ -139,9 +140,9 @@ where
             if let Some(node) = x {
                 let mut node_guard = node.write().await;
                 node_guard.orders.insert(data.pubkey, inner_map);
-                node_guard.size+=1;
-                node_guard.value_sum+=raw_order_clone.s.p*raw_order_clone.s.v;
-                node_guard.size+=1;
+                node_guard.size += 1;
+                node_guard.value_sum += raw_order_clone.s.p * raw_order_clone.s.v;
+                node_guard.size += 1;
             }
         }
     }
@@ -190,7 +191,15 @@ where
             // fix our subtree and then
             // iteratively recurse up until root because we want to return it
             let mut node = tree_node.clone();
-            let mut parent_clone = tree_node.read().await.parent.as_ref().unwrap().read().await.clone();
+            let mut parent_clone = tree_node
+                .read()
+                .await
+                .parent
+                .as_ref()
+                .unwrap()
+                .read()
+                .await
+                .clone();
             let mut parent_color = parent_clone.color;
 
             while !is_root && parent_color == NodeColor::Red {
@@ -225,20 +234,30 @@ where
                                 let mut parent = node.read().await.parent.as_ref().unwrap().clone();
                                 // uncle is on right side
                                 if uncle_node.is_some()
-                                    && uncle_node.as_ref().unwrap().read().await.color == NodeColor::Red
+                                    && uncle_node.as_ref().unwrap().read().await.color
+                                        == NodeColor::Red
                                 {
                                     // flip parent and uncle to black
                                     parent.write().await.color = NodeColor::Black;
                                     uncle_node.unwrap().write().await.color = NodeColor::Black;
                                     // flip grandparent to red
-                                    parent.read().await.parent.as_ref().unwrap().write().await.color =
-                                        NodeColor::Red;
+                                    parent
+                                        .read()
+                                        .await
+                                        .parent
+                                        .as_ref()
+                                        .unwrap()
+                                        .write()
+                                        .await
+                                        .color = NodeColor::Red;
                                     // iteratively recurse up tree to check for any other red-black violations
                                     node = parent.read().await.clone().parent.clone().unwrap();
                                 } else {
                                     // uncle is black (None counts as black too)
                                     // need to know whether current node is either on left or right side
-                                    if parent.read().await.clone().price < node.read().await.clone().price {
+                                    if parent.read().await.clone().price
+                                        < node.read().await.clone().price
+                                    {
                                         // node is on right side
                                         // rotate node left so that node becomes parent and parent becomes left child of node
                                         let parent_tmp =
@@ -249,8 +268,15 @@ where
                                     }
 
                                     parent.write().await.color = NodeColor::Black;
-                                    parent.read().await.parent.as_ref().unwrap().write().await.color =
-                                        NodeColor::Red;
+                                    parent
+                                        .read()
+                                        .await
+                                        .parent
+                                        .as_ref()
+                                        .unwrap()
+                                        .write()
+                                        .await
+                                        .color = NodeColor::Red;
                                     let grandparent = node
                                         .read()
                                         .await
@@ -271,20 +297,30 @@ where
                                 let mut parent = node.read().await.parent.as_ref().unwrap().clone();
                                 // uncle is on left side
                                 if uncle_node.is_some()
-                                    && uncle_node.as_ref().unwrap().read().await.color == NodeColor::Red
+                                    && uncle_node.as_ref().unwrap().read().await.color
+                                        == NodeColor::Red
                                 {
                                     // flip parent and uncle to black
                                     parent.write().await.color = NodeColor::Black;
                                     uncle_node.unwrap().write().await.color = NodeColor::Black;
                                     // flip grandparent to red
-                                    parent.read().await.parent.as_ref().unwrap().write().await.color =
-                                        NodeColor::Red;
+                                    parent
+                                        .read()
+                                        .await
+                                        .parent
+                                        .as_ref()
+                                        .unwrap()
+                                        .write()
+                                        .await
+                                        .color = NodeColor::Red;
                                     // iteratively recurse up tree to check for any other red-black violations
                                     node = parent.read().await.clone().parent.clone().unwrap();
                                 } else {
                                     // uncle is black
                                     // need to know whether current node is either left or right child of parent
-                                    if parent.read().await.clone().price > node.read().await.clone().price {
+                                    if parent.read().await.clone().price
+                                        > node.read().await.clone().price
+                                    {
                                         // node is on left side
                                         // rotate node right so that node becomes parent and parent becomes right child of node
                                         let parent_tmp =
@@ -294,8 +330,15 @@ where
                                         parent = node.read().await.parent.as_ref().unwrap().clone();
                                     }
                                     parent.write().await.color = NodeColor::Black;
-                                    parent.read().await.parent.as_ref().unwrap().write().await.color =
-                                        NodeColor::Red;
+                                    parent
+                                        .read()
+                                        .await
+                                        .parent
+                                        .as_ref()
+                                        .unwrap()
+                                        .write()
+                                        .await
+                                        .color = NodeColor::Red;
                                     let grandparent = node
                                         .read()
                                         .await
@@ -319,7 +362,15 @@ where
                 }
                 is_root = node.read().await.parent.is_none();
                 if !is_root {
-                    parent_clone = node.read().await.parent.as_ref().unwrap().read().await.clone();
+                    parent_clone = node
+                        .read()
+                        .await
+                        .parent
+                        .as_ref()
+                        .unwrap()
+                        .read()
+                        .await
+                        .clone();
                     parent_color = parent_clone.color;
                 }
             }
@@ -335,7 +386,7 @@ where
         root
     }
 
-   async fn rotate_left(&self, tree_node: LimitNode<T>) {
+    async fn rotate_left(&self, tree_node: LimitNode<T>) {
         let cur_parent = tree_node;
         let right_child = cur_parent.read().await.right.clone();
 
@@ -347,7 +398,8 @@ where
 
         if right_child.is_some() {
             // make right child's parent the current grandparent
-            right_child.as_ref().unwrap().write().await.parent = cur_parent.read().await.parent.clone();
+            right_child.as_ref().unwrap().write().await.parent =
+                cur_parent.read().await.parent.clone();
             if right_child.as_ref().unwrap().read().await.left.is_some() {
                 // make right_child's left child's parent the current parent
                 let l = right_child.as_ref().unwrap().read().await.left.clone();
@@ -386,7 +438,8 @@ where
 
         if left_child.is_some() {
             // make left child's parent the current grandparent
-            left_child.as_ref().unwrap().write().await.parent = cur_parent.read().await.parent.clone();
+            left_child.as_ref().unwrap().write().await.parent =
+                cur_parent.read().await.parent.clone();
             if left_child.as_ref().unwrap().read().await.right.is_some() {
                 // make left_child's right child's parent the current parent
                 let r = left_child.as_ref().unwrap().read().await.right.clone();
@@ -413,13 +466,17 @@ where
         cur_parent.write().await.parent = left_child.clone();
     }
 
-     pub async fn search(&self, key: Fq, data: Data) -> LimitNodePtr<T> {
+    pub async fn search(&self, key: Fq, data: Data) -> LimitNodePtr<T> {
         let dummy = Node::<T>::new(key, data).unwrap().write().await.clone();
         self.search_node(&self.root, &dummy).await
     }
 
     #[async_recursion]
-    pub async fn search_node(&self, tree_node: &LimitNodePtr<T>, node: &Node<T>) -> LimitNodePtr<T>{
+    pub async fn search_node(
+        &self,
+        tree_node: &LimitNodePtr<T>,
+        node: &Node<T>,
+    ) -> LimitNodePtr<T> {
         match tree_node {
             Some(sub_tree) => {
                 let sub_tree_clone = sub_tree.read().await.clone();
@@ -488,12 +545,14 @@ where
                 x = y.as_ref().unwrap().read().await.clone().right;
                 if y.as_ref()
                     .unwrap()
-                    .read().await
+                    .read()
+                    .await
                     .clone()
                     .parent
                     .as_ref()
                     .unwrap()
-                    .read().await
+                    .read()
+                    .await
                     .clone()
                     .price
                     == u.as_ref().unwrap().read().await.clone().price
@@ -502,22 +561,26 @@ where
                         x.as_ref().unwrap().write().await.parent = y.clone();
                     }
                 } else {
-                    self.transplant(y.clone(), y.as_ref().unwrap().read().await.right.clone()).await;
+                    self.transplant(y.clone(), y.as_ref().unwrap().read().await.right.clone())
+                        .await;
                     y.as_ref().unwrap().write().await.right =
                         u.as_ref().unwrap().read().await.right.clone();
                     y.as_ref()
                         .unwrap()
-                        .read().await
+                        .read()
+                        .await
                         .right
                         .as_ref()
                         .unwrap()
-                        .write().await
+                        .write()
+                        .await
                         .parent = y.clone();
                 }
                 self.transplant(u.clone(), y.clone()).await;
                 y.as_ref().unwrap().write().await.left = v.clone();
                 v.as_ref().unwrap().write().await.parent = y.clone();
-                y.as_ref().unwrap().write().await.color = u.as_ref().unwrap().read().await.color.clone();
+                y.as_ref().unwrap().write().await.color =
+                    u.as_ref().unwrap().read().await.color.clone();
             }
             if u_original_color == NodeColor::Black {
                 self.delete_fix(x.clone(), p.clone(), side).await;
@@ -527,7 +590,8 @@ where
             if let Some(inner_map) = z
                 .as_ref()
                 .unwrap()
-                .write().await
+                .write()
+                .await
                 .orders
                 .get_mut(&data.pubkey)
             {
@@ -541,7 +605,7 @@ where
         // x color is true if black and false if red
         let mut x_color = if x.is_some() {
             x.as_ref().unwrap().read().await.color == NodeColor::Black
-           // x.as_ref().unwrap().borrow().clone().color == NodeColor::Black
+            // x.as_ref().unwrap().borrow().clone().color == NodeColor::Black
         } else {
             // Node is none so it is black
             true
@@ -557,47 +621,48 @@ where
                     // let mut s = cur_p.as_ref().unwrap().borrow().right.clone();
                     let mut s = cur_p.as_ref().unwrap().read().await.right.clone();
                     if s.is_some() {
-                      //  if s.as_ref().unwrap().borrow().clone().color == NodeColor::Red {
+                        //  if s.as_ref().unwrap().borrow().clone().color == NodeColor::Red {
                         if s.as_ref().unwrap().read().await.color == NodeColor::Red {
                             // DB's sibling is red
                             // swap color of p with s
                             // rotate parent node left
-                           // s.as_ref().unwrap().borrow_mut().color = NodeColor::Black;
+                            // s.as_ref().unwrap().borrow_mut().color = NodeColor::Black;
                             s.as_ref().unwrap().write().await.color = NodeColor::Black;
                             //cur_p.as_ref().unwrap().borrow_mut().color = NodeColor::Red;
                             cur_p.as_ref().unwrap().write().await.color = NodeColor::Red;
                             self.rotate_left(cur_p.as_ref().unwrap().clone()).await;
-                          // s = cur_p.as_ref().unwrap().borrow().right.clone();
-                          s = cur_p.as_ref().unwrap().read().await.right.clone();
+                            // s = cur_p.as_ref().unwrap().borrow().right.clone();
+                            s = cur_p.as_ref().unwrap().read().await.right.clone();
                         }
-                       // let s_left = s.as_ref().unwrap().borrow().clone().left.clone();
+                        // let s_left = s.as_ref().unwrap().borrow().clone().left.clone();
                         let s_left = s.as_ref().unwrap().read().await.clone().left.clone();
-                       // let s_right = s.as_ref().unwrap().borrow().clone().right.clone();
+                        // let s_right = s.as_ref().unwrap().borrow().clone().right.clone();
                         let s_right = s.as_ref().unwrap().read().await.clone().right.clone();
                         let s_left_color = if s_left.is_some() {
-                          //  s_left.as_ref().unwrap().borrow().clone().color == NodeColor::Black
+                            //  s_left.as_ref().unwrap().borrow().clone().color == NodeColor::Black
                             s_left.as_ref().unwrap().read().await.clone().color == NodeColor::Black
                         } else {
                             true
                         };
 
                         let s_right_color = if s_right.is_some() {
-                           // s_right.as_ref().unwrap().borrow().clone().color == NodeColor::Black
-                           s_right.as_ref().unwrap().read().await.clone().color == NodeColor::Black
+                            // s_right.as_ref().unwrap().borrow().clone().color == NodeColor::Black
+                            s_right.as_ref().unwrap().read().await.clone().color == NodeColor::Black
                         } else {
                             true
                         };
 
                         if s_left_color && s_right_color {
-                         //   s.as_ref().unwrap().borrow_mut().color = NodeColor::Red;
+                            //   s.as_ref().unwrap().borrow_mut().color = NodeColor::Red;
                             s.as_ref().unwrap().write().await.color = NodeColor::Red;
                             cur_x = cur_p.clone();
-                           // let g = cur_p.as_ref().unwrap().borrow().clone().parent.clone();
+                            // let g = cur_p.as_ref().unwrap().borrow().clone().parent.clone();
                             let g = cur_p.as_ref().unwrap().read().await.clone().parent.clone();
                             cur_p = g.clone();
                             x_color = if cur_x.is_some() {
-                               // cur_x.as_ref().unwrap().borrow().clone().color == NodeColor::Black
-                                cur_x.as_ref().unwrap().read().await.clone().color == NodeColor::Black
+                                // cur_x.as_ref().unwrap().borrow().clone().color == NodeColor::Black
+                                cur_x.as_ref().unwrap().read().await.clone().color
+                                    == NodeColor::Black
                             } else {
                                 true
                             };
@@ -609,7 +674,7 @@ where
                                 if s_left.is_some() {
                                     // s_left.as_ref().unwrap().borrow_mut().color = NodeColor::Black;
                                     s_left.as_ref().unwrap().write().await.color = NodeColor::Black;
-                                   // s.as_ref().unwrap().borrow_mut().color = NodeColor::Red;
+                                    // s.as_ref().unwrap().borrow_mut().color = NodeColor::Red;
                                     s.as_ref().unwrap().write().await.color = NodeColor::Red;
                                     self.rotate_right(s.unwrap()).await;
                                     // s = cur_p.as_ref().unwrap().borrow().right.clone();
@@ -698,21 +763,21 @@ where
     async fn transplant(&mut self, z: LimitNodePtr<T>, v: LimitNodePtr<T>) {
         // transplant is responsible for deleting u and replacing it with v
         let u = z.unwrap();
-       // let u_p = u.borrow().parent.clone();
-       let u_p = u.read().await.parent.clone();
+        // let u_p = u.borrow().parent.clone();
+        let u_p = u.read().await.parent.clone();
         if u_p.is_none() {
             // deleting root node
             self.root = v.clone();
         } else {
             if u_p.as_ref().unwrap().read().await.price > u.read().await.price {
-          //  if u_p.as_ref().unwrap().borrow().clone().price > u.borrow().clone().price {
+                //  if u_p.as_ref().unwrap().borrow().clone().price > u.borrow().clone().price {
                 // z is on the left of parent
                 u_p.as_ref().unwrap().write().await.left = v.clone();
-           //     u_p.as_ref().unwrap().borrow_mut().left = v.clone();
+            //     u_p.as_ref().unwrap().borrow_mut().left = v.clone();
             } else {
                 // z is on the right of parent
                 u_p.as_ref().unwrap().write().await.right = v.clone();
-               //  u_p.as_ref().unwrap().borrow_mut().right = v.clone();
+                //  u_p.as_ref().unwrap().borrow_mut().right = v.clone();
             }
         }
         if v.is_some() {
@@ -769,7 +834,8 @@ where
                     .unwrap()
                     .as_ref()
                     .unwrap()
-                    .read().await
+                    .read()
+                    .await
                     .clone()
                     .left
                     .clone();
@@ -778,7 +844,8 @@ where
                     .unwrap()
                     .as_ref()
                     .unwrap()
-                    .read().await
+                    .read()
+                    .await
                     .clone()
                     .right
                     .clone();
@@ -814,7 +881,10 @@ where
             let n = queue.len();
             for _ in 0..n {
                 let node = queue.pop_front().unwrap().unwrap();
-                for child in [node.read().await.left.clone(), node.read().await.right.clone()] {
+                for child in [
+                    node.read().await.left.clone(),
+                    node.read().await.right.clone(),
+                ] {
                     if child.is_some() {
                         queue.push_back(child);
                     }
@@ -840,7 +910,7 @@ where
                 root = p.clone();
             } else {
                 let pop = stack.pop().unwrap();
-                print!(" {} ", pop.as_ref().unwrap().read().await.price.clone());
+                print!(" {:?} ", pop.as_ref().unwrap().read().await.price.clone());
                 root = pop.as_ref().unwrap().read().await.right.clone();
             }
         }
@@ -859,7 +929,7 @@ where
         while !stack.is_empty() {
             cur = stack.pop().unwrap();
             root = cur.clone();
-            print!(" {} ", root.as_ref().unwrap().read().await.price.clone());
+            print!(" {:?} ", root.as_ref().unwrap().read().await.price.clone());
             let root_right = root.as_ref().unwrap().read().await.right.clone();
             let root_left = root.as_ref().unwrap().read().await.left.clone();
             if root_right.is_some() {
@@ -879,7 +949,7 @@ where
         };
         let inorder_nodes = self.inorder();
         for node in inorder_nodes.await {
-            print!(" {} ", node.unwrap().read().await.price.clone());
+            print!(" {:?} ", node.unwrap().read().await.price.clone());
         }
         println!("\n");
     }
@@ -902,7 +972,10 @@ where
             for _ in 0..n {
                 let node = queue.pop_front().unwrap().unwrap();
                 res.push_back(Some(node.clone()));
-                for child in [node.read().await.left.clone(), node.read().await.right.clone()] {
+                for child in [
+                    node.read().await.left.clone(),
+                    node.read().await.right.clone(),
+                ] {
                     if child.is_some() {
                         queue.push_back(child);
                     }
