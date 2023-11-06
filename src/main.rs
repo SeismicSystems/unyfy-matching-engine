@@ -3,6 +3,7 @@ use futures_util::stream::StreamExt;
 use futures_util::TryFutureExt;
 use futures_util::{FutureExt, SinkExt};
 use halo2curves::ff::Field;
+use num_bigint::{BigUint, ToBigUint};
 use sha2::digest::typenum::uint;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -133,64 +134,136 @@ async fn handle_websocket_messages(
 ) {
     let (mut sender, mut receiver) = websocket.split();
 
-    let order1 = Order {
-        t: TransparentStructure {
-            phi: Fq::from(1), // 0 for bid
-            chi: "92bf259f558808106e4840e2642352b156a31bc41e5b4283df2937278f0a7a65".to_string(), // Token address for the target project
-            d: "0x1".to_string(), // Denomination token address, set to "0x1" for USDC or ETH
-        },
-        s: ShieldedStructure {
-            p: Fq::from(100931421600), // Price, scaled by 10^9 with 10^7 precision
-            v: Fq::from(1000000000),   // Volume, scaled by 10^9
-            alpha: Fq::from(1),        // Access key, randomly sampled from Fq
-        },
-    };
+    while let Some(message) = receiver.next().await {
+        if let Ok(msg) = message {
+            if msg.is_text() {
+                // Parse the message
+                let text = msg.to_str().unwrap();
+                let json_msg: serde_json::Value = serde_json::from_str(text).unwrap();
 
-    let hash = hash_three_values(order1.s.p, order1.s.v, order1.s.alpha).await;
+                // Assuming 'action' field determines the kind of the message
+                if json_msg["action"] == "sendorder" {
+                    println!("Hi!");
+                    let side = json_msg["data"]["transparent"]["side"].as_u64().unwrap();
 
-    let order_1_commitment = Commitment {
-        public: order1.t.clone(),
-        private: hash,
-    };
+                    let price_str = json_msg["data"]["shielded"]["price"].as_str().unwrap();
+                    let volume_str = json_msg["data"]["shielded"]["volume"].as_str().unwrap();
+                    let access_key_str =
+                        json_msg["data"]["shielded"]["accessKey"].as_str().unwrap();
+                    // Parse the strings into BigUint, assuming decimal format
+                    let price = BigUint::parse_bytes(price_str.as_bytes(), 10).unwrap();
+                    let volume = BigUint::parse_bytes(volume_str.as_bytes(), 10).unwrap();
+                    let access_key = BigUint::parse_bytes(access_key_str.as_bytes(), 10).unwrap();
 
-    let data = Data {
-        pubkey: U256::from_str_hex("0x0").unwrap(),
-        raw_order: order1.clone(),
-        raw_order_commitment: order_1_commitment.clone(),
-    };
+                    let price_bytes_vec = price.to_bytes_le();
+                    let volume_bytes_vec = volume.to_bytes_le();
+                    let access_key_bytes_vec = access_key.to_bytes_le();
 
-    ask_tree.write().await.insert(order1.s.p, data).await;
-
-    ask_tree.read().await.print_inorder().await;
-
-    let mut matches: Vec<Order> = Vec::new();
-
-    matches = match_ask::<Fq>(order1.clone(), bid_tree.clone())
-        .await
-        .unwrap();
-
-    for order_match in &matches {
-        println!("{:?}", order_match);
-    }
-
-    // sender.
-    /*let (mut tx, mut rx) = websocket.split();
-
-    while let Some(result) = rx.next().await {
-        match result {
-            Ok(msg) => {
-                if msg.is_text() {
-                    let text = msg.to_str().unwrap();
-                    if text == "insert 1" {
-                        // match_bid(order, orderbook).await;
+                    // Convert BigUint to [u8; 32] in little-endian format
+                    let mut price_bytes = [0u8; 32];
+                    let mut volume_bytes = [0u8; 32];
+                    let mut access_key_bytes = [0u8; 32];
+                    for (i, byte) in price_bytes_vec.iter().enumerate() {
+                        price_bytes[i] = *byte;
                     }
-                    println!("Received message: {}", text);
-                    // Here you can parse `text` as a JSON object and handle it accordingly
+
+                    for (i, byte) in volume_bytes_vec.iter().enumerate() {
+                        volume_bytes[i] = *byte;
+                    }
+
+                    for (i, byte) in access_key_bytes_vec.iter().enumerate() {
+                        access_key_bytes[i] = *byte;
+                    }
+
+                    let token = json_msg["data"]["transparent"]["token"].as_str().unwrap();
+                    let denomination = json_msg["data"]["transparent"]["denomination"]
+                        .as_str()
+                        .unwrap();
+
+                    // Create the order
+
+                    let order = Order {
+                        t: TransparentStructure {
+                            phi: Fq::from(side),
+                            chi: token.to_string(),
+                            d: denomination.to_string(),
+                        },
+                        s: ShieldedStructure {
+                            p: Fq::from_bytes(&price_bytes).unwrap(),
+                            v: Fq::from_bytes(&volume_bytes).unwrap(),
+                            alpha: Fq::from_bytes(&access_key_bytes).unwrap(),
+                        },
+                    };
+
+                    let hash = hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
+
+                    let commitment = Commitment {
+                        public: order.t.clone(),
+                        private: hash,
+                    };
+
+                    let data = Data {
+                        pubkey: U256::from_str_hex("0x0").unwrap(), // example pubkey, replace with actual -- TODO
+                        raw_order: order.clone(),
+                        raw_order_commitment: commitment.clone(),
+                    };
+
+                    println!("We here!");
+
+                    if side == 0 {
+                        bid_tree.write().await.insert(order.s.p, data).await;
+                        bid_tree.read().await.print_inorder().await;
+                    } else {
+                        ask_tree.write().await.insert(order.s.p, data).await;
+                        ask_tree.read().await.print_inorder().await;
+                    }
+
+                    // Add to the appropriate tree
+                    /*if side == 0 {
+                        let mut bid_tree_write = bid_tree.write().await;
+                        bid_tree_write.insert(order.s.p, data).await;
+                        bid_tree.read().await.print_inorder().await;
+                        // should actually be inserted into the staging queue -- TODO
+                    } else {
+                        let mut ask_tree_write = ask_tree.write().await;
+                        ask_tree_write.insert(order.s.p, data).await;
+                        ask_tree.read().await.print_inorder().await;
+                        // should actually be inserted into the staging queue -- TODO
+                    }
+
+
+                    println!("Ok!!"); */
+
+                    let side_return =
+                        BigUint::from_bytes_le(&order.t.phi.to_bytes()).to_str_radix(10);
+                    let commitment_return =
+                        BigUint::from_bytes_le(&commitment.private.to_bytes()).to_str_radix(10);
+
+                    // Construct the JSON payload
+                    let payload = json!({
+                        "action": "sendorder",
+                        "enclaveSignature": {
+                            "orderCommitment": {
+                                "transparent": {
+                                    "side": side_return,
+                                    "token": order.t.chi,
+                                    "denomination": order.t.d
+                                },
+                                "shielded": commitment_return,
+                            },
+                            "signatureValue": "Yes"
+                        }
+                    });
+
+                    // Send the payload back to the client
+                    let message = Message::text(payload.to_string());
+                    sender.send(message).await.unwrap();
+
+                    // sender.
                 }
             }
-            Err(e) => eprintln!("Error receiving message: {:?}", e),
         }
-    } */
+    }
 }
 
 async fn hash_three_values(a: Fq, b: Fq, c: Fq) -> Fq {

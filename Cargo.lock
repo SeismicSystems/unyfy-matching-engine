@@ -1455,6 +1455,7 @@ dependencies = [
  "futures",
  "futures-util",
  "halo2curves",
+ "num-bigint",
  "pretty_env_logger",
  "rand",
  "serde",
