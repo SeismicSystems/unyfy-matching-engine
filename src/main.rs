@@ -349,7 +349,7 @@ async fn handle_websocket_messages(
 
                         if found {
                             matches =
-                                Some(match_ask(order.clone(), bid_tree.clone()).await.unwrap());
+                                match_ask(order.clone(), bid_tree.clone()).await
                         } else {
                             matches = None
                         }
