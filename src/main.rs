@@ -390,7 +390,7 @@ async fn handle_websocket_messages(
 
                     // Construct the JSON payload
                     let payload = json!({
-                        "action": "getorderbook",
+                        "action": "getcrossedorders",
                         "orderCommitment": {
                             "transparent": {
                                 "side": side,
