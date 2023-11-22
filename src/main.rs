@@ -13,7 +13,6 @@ use tokio::sync::RwLock;
 use unyfy_matching_engine::models::Orderbook;
 use unyfy_matching_engine::models::RBTree;
 use warp::ws::Message;
-use warp::Rejection;
 use warp::*;
 // use ark_bn254::Fr as Fq;
 use ethnum::U256;
@@ -21,7 +20,7 @@ use halo2curves::bn256::Fr as Fq;
 use rand::Rng;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::error::Error;
+// use std::error::Error;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -36,6 +35,19 @@ use ethers::prelude::*;
 use ethers::utils::keccak256;
 use std::str::FromStr;
 use std::time::UNIX_EPOCH;
+use chrono::prelude::*;
+use jsonwebtoken::{encode, decode, Header, Algorithm, Validation, EncodingKey, DecodingKey};
+use std::fmt;
+use warp::{
+    filters::header::headers_cloned,
+    http::header::{HeaderMap, HeaderValue, AUTHORIZATION},
+    reject, Filter, Rejection,
+};
+use dotenv::dotenv;
+use std::env;
+use std::io::Error;
+
+const BEARER: &str = "Bearer ";
 pub struct Client {
     pub user_id: u32, // pubkey of the client
     pub topics: Vec<String>,
@@ -76,13 +88,26 @@ pub struct ClientResponse{
     pub_key: String,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+
+pub struct Claims{
+    pub sub: String,
+    pub exp: usize,
+}
+
+
 #[derive(Debug)]
-enum MyError {
+pub enum MyError {
     Timeout,
     InvalidSignature,
     InvalidChallenge,
+    JWTTokenCreationError,
+    NoAuthHeaderError,
+    InvalidAuthHeaderError,
+    JWTTokenError,
 }
 
+impl warp::reject::Reject for MyError {}
 
 type ResultUtil<T> = std::result::Result<T, Rejection>;
 type Clients = Arc<Mutex<HashMap<String, Client>>>;
@@ -480,7 +505,7 @@ pub async fn handle_submit_response(state: Arc<AppState>, response: ClientRespon
         return match verify_signature(&response) {
             Ok(_) => {
                 //let jwt = issue_jwt();
-                Ok(warp::reply::json(&"Hi"))
+                Ok(warp::reply::json(&create_jwt(&response.pub_key).unwrap()))
             },
             Err(_) => Ok(warp::reply::json(&"Invalid signature")),
         };
@@ -489,6 +514,63 @@ pub async fn handle_submit_response(state: Arc<AppState>, response: ClientRespon
     }
 }
 
+fn create_jwt(pub_key: &str)->Result<String, MyError>{
+
+    let expiration = Utc::now()
+        .checked_add_signed(chrono::Duration::seconds(900))
+        .expect("valid timestamp")
+        .timestamp(); // valid for 15 minutes from issuance
+
+    let claims = Claims {
+        sub: pub_key.to_owned(),
+        exp: expiration as usize,
+    };
+
+   // let a: &[u8] = b"hello";
+
+    let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+
+    let header=Header::new(Algorithm::HS512);
+    encode(&header, &claims, &EncodingKey::from_secret(jwt_secret.as_bytes()))
+    .map_err(|_| MyError::JWTTokenCreationError)
+}
+
+pub fn with_auth() -> impl Filter<Extract = (String,), Error = Rejection> + Clone {
+    headers_cloned()
+        .and_then(authorize)
+}
+
+pub async fn authorize(headers: HeaderMap<HeaderValue>) -> WebResult<String> {
+    match jwt_from_header(&headers) {
+        Ok(jwt) => {
+            let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET must be set");
+            let decoded = decode::<Claims>(
+                &jwt,
+                &DecodingKey::from_secret(jwt_secret.as_bytes()),
+                &Validation::new(Algorithm::HS512),
+            )
+            .map_err(|_| reject::custom(MyError::JWTTokenError))?;
+            Ok(decoded.claims.sub)
+        }
+        Err(e) => return Err(reject::custom(e)),
+    }
+}
+
+
+fn jwt_from_header(headers: &HeaderMap<HeaderValue>) -> Result<String, MyError> {
+    let header = match headers.get(AUTHORIZATION) {
+        Some(v) => v,
+        None => return Err(MyError::NoAuthHeaderError),
+    };
+    let auth_header = match std::str::from_utf8(header.as_bytes()) {
+        Ok(v) => v,
+        Err(_) => return Err(MyError::NoAuthHeaderError),
+    };
+    if !auth_header.starts_with(BEARER) {
+        return Err(MyError::InvalidAuthHeaderError);
+    }
+    Ok(auth_header.trim_start_matches(BEARER).to_owned())
+}
 
 fn verify_signature(client_response: &ClientResponse) -> Result<(), SignatureError> {
     // Decode the hex-encoded signature, message, and public key
@@ -496,7 +578,6 @@ fn verify_signature(client_response: &ClientResponse) -> Result<(), SignatureErr
     let message_bytes = hex::decode(strip_0x_prefix(&client_response.challenge_id)).unwrap();
     let pub_key_bytes = hex::decode(strip_0x_prefix(&client_response.pub_key)).unwrap();
 
-    // Construct the Signature object (assuming it's 65 bytes long)
     let signature = Signature::try_from(signature_bytes.as_slice()).unwrap();
 
     // Hash the message as Ethereum expects
@@ -532,6 +613,7 @@ async fn main() {
 
     let state_req_challenge = state.clone();
     let state_sub_response = state.clone();
+
     let request_challenge = warp::post()
     .and(warp::path("request_challenge"))
     .and(warp::any().map(move || state_req_challenge.clone()))
@@ -564,6 +646,14 @@ async fn main() {
     let ask_tree = warp::any().map(move || orderbook.ask_tree.clone());
 
     pretty_env_logger::init();
+
+    let ws_with_auth = warp::path("ws_auth")
+        .and(warp::ws())
+        .and(with_auth())
+        .map(|ws: warp::ws::Ws, pubkey: String| {
+            ws.on_upgrade(move |socket| handle_success(socket, pubkey))
+        });
+
 
     let routes = warp::path("ws")
         .and(warp::ws())
