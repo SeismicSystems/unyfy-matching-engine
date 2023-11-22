@@ -4,6 +4,7 @@ use futures_util::TryFutureExt;
 use futures_util::{FutureExt, SinkExt};
 use halo2curves::ff::Field;
 use num_bigint::{BigUint, ToBigUint};
+use serde_derive::{Deserialize, Serialize};
 use sha2::digest::typenum::uint;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -29,7 +30,12 @@ use unyfy_matching_engine::matching::*;
 use unyfy_matching_engine::models::*;
 use unyfy_matching_engine::raw_order::*;
 use warp::ws::WebSocket;
-
+use std::time::SystemTime;
+use warp::Reply;
+use ethers::prelude::*;
+use ethers::utils::keccak256;
+use std::str::FromStr;
+use std::time::UNIX_EPOCH;
 pub struct Client {
     pub user_id: u32, // pubkey of the client
     pub topics: Vec<String>,
@@ -57,8 +63,31 @@ pub struct TopicsRequest {
     topics: Vec<String>,
 }
 
-type Result<T> = std::result::Result<T, Rejection>;
+
+// Shared state to track challenges
+pub struct AppState {
+    challenges: Mutex<HashMap<String, u64>>, // Maps challenge ID/string to the timestamp of the challenge, useful for timeouts
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct ClientResponse{
+    challenge_id: String,
+    signature: String, 
+    pub_key: String,
+}
+
+#[derive(Debug)]
+enum MyError {
+    Timeout,
+    InvalidSignature,
+    InvalidChallenge,
+}
+
+
+type ResultUtil<T> = std::result::Result<T, Rejection>;
 type Clients = Arc<Mutex<HashMap<String, Client>>>;
+// type Result<T> = std::result::Result<T, error::Error>;
+type WebResult<T> = std::result::Result<T, Rejection>;
 
 async fn read_and_insert(
     file_path: &Path,
@@ -425,13 +454,94 @@ async fn hash_three_values(a: Fq, b: Fq, c: Fq) -> Fq {
     Fq::from_bytes(&bytes).unwrap()
 }
 
-type SafeOrderbook = Arc<RwLock<Orderbook<Fq>>>;
+pub async fn handle_request_challenge(state: Arc<AppState>) -> WebResult<impl Reply>{
+    let challenge_id = generate_challenge_id(); // Implement this function to generate unique challenge IDs
+    let challenge_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+    let mut challenges = state.challenges.lock().unwrap();
+    challenges.insert(challenge_id.clone(), challenge_timestamp);
+    // Send the challenge to the client
+    Ok(warp::reply::json(&challenge_id))
+}
+
+pub fn generate_challenge_id() -> String {
+    let mut rng = rand::thread_rng();
+    let id: String = (0..16)
+    .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
+    .collect();
+    id
+}
+
+pub async fn handle_submit_response(state: Arc<AppState>, response: ClientResponse)-> WebResult <impl Reply> {
+    let challenges = state.challenges.lock().unwrap();
+    if let Some(challenge) = challenges.get(&response.challenge_id) {
+        if current_timestamp() - challenge > 300 { // 5 minutes in seconds
+            return Ok(warp::reply::json(&"Challenge timed out!"));
+        }
+        return match verify_signature(&response) {
+            Ok(_) => {
+                //let jwt = issue_jwt();
+                Ok(warp::reply::json(&"Hi"))
+            },
+            Err(_) => Ok(warp::reply::json(&"Invalid signature")),
+        };
+    } else {
+        return Ok(warp::reply::json(&"Challenge not found!"));
+    }
+}
+
+
+fn verify_signature(client_response: &ClientResponse) -> Result<(), SignatureError> {
+    // Decode the hex-encoded signature, message, and public key
+    let signature_bytes = hex::decode(strip_0x_prefix(&client_response.signature)).unwrap();
+    let message_bytes = hex::decode(strip_0x_prefix(&client_response.challenge_id)).unwrap();
+    let pub_key_bytes = hex::decode(strip_0x_prefix(&client_response.pub_key)).unwrap();
+
+    // Construct the Signature object (assuming it's 65 bytes long)
+    let signature = Signature::try_from(signature_bytes.as_slice()).unwrap();
+
+    // Hash the message as Ethereum expects
+    let message_hash = keccak256(&message_bytes);
+
+    // Convert the provided address to H160 format
+    let provided_address = H160::from_slice(&pub_key_bytes);
+
+    // Verify the signature using the ethers crate
+    signature.verify(message_hash, provided_address)
+}
+
+
+fn strip_0x_prefix(hex_str: &str) -> &str {
+    if hex_str.starts_with("0x") {
+        &hex_str[2..]
+    } else {
+        hex_str
+    }
+}
+
+fn current_timestamp() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+}
+
 
 #[tokio::main]
 async fn main() {
     // let clients = Clients::new(Mutex::new(HashMap::new()));
-    let sample = Arc::new(RwLock::new(u8::from(0u8)));
-    let sample = warp::any().map(move || sample.clone());
+    let state = Arc::new(AppState {
+        challenges: Mutex::new(HashMap::new())
+    });
+
+    let state_req_challenge = state.clone();
+    let state_sub_response = state.clone();
+    let request_challenge = warp::post()
+    .and(warp::path("request_challenge"))
+    .and(warp::any().map(move || state_req_challenge.clone()))
+    .and_then(handle_request_challenge);
+
+    let submit_response = warp::post()
+        .and(warp::path("submit_response"))
+        .and(warp::any().map(move || state_sub_response.clone()))
+        .and(warp::body::json())
+        .and_then(handle_submit_response);
 
     let orderbook = Orderbook::<Fq> {
         bid_tree: Arc::new(RwLock::new(RBTree::new())),
