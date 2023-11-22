@@ -380,7 +380,7 @@ async fn handle_websocket_messages(
                     };
 
                     let data = Data {
-                        pubkey: U256::from_str_hex("0x0").unwrap(), // example pubkey, replace with actual -- TODO
+                        pubkey: U256::from_str_hex(&pubkey.as_str()).unwrap(), // example pubkey, replace with actual -- TODO
                         raw_order: order.clone(),
                         raw_order_commitment: commitment.clone(),
                     };
