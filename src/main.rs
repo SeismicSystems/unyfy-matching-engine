@@ -21,33 +21,36 @@ use rand::Rng;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 // use std::error::Error;
+use ethers::prelude::*;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::path::Path;
+use std::time::SystemTime;
 use unyfy_matching_engine::matching::*;
 use unyfy_matching_engine::models::*;
 use unyfy_matching_engine::raw_order::*;
 use warp::ws::WebSocket;
-use std::time::SystemTime;
 use warp::Reply;
-use ethers::prelude::*;
-use ethers::utils::keccak256;
+// use ethers::utils::keccak256;
+use chrono::prelude::*;
+use dotenv::dotenv;
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use std::env;
+use std::fmt;
+use std::io::Error;
 use std::str::FromStr;
 use std::time::UNIX_EPOCH;
-use chrono::prelude::*;
-use jsonwebtoken::{encode, decode, Header, Algorithm, Validation, EncodingKey, DecodingKey};
-use std::fmt;
 use warp::{
     filters::header::headers_cloned,
     http::header::{HeaderMap, HeaderValue, AUTHORIZATION},
     reject, Filter, Rejection,
 };
-use dotenv::dotenv;
-use std::env;
-use std::io::Error;
+use web3::signing::{keccak256, recover};
 
 const BEARER: &str = "Bearer ";
+
+const JWT_SECRET: &[u8] = b"secret";
 pub struct Client {
     pub user_id: u32, // pubkey of the client
     pub topics: Vec<String>,
@@ -75,26 +78,24 @@ pub struct TopicsRequest {
     topics: Vec<String>,
 }
 
-
 // Shared state to track challenges
 pub struct AppState {
     challenges: Mutex<HashMap<String, u64>>, // Maps challenge ID/string to the timestamp of the challenge, useful for timeouts
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct ClientResponse{
+pub struct ClientResponse {
     challenge_id: String,
-    signature: String, 
+    signature: String,
     pub_key: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 
-pub struct Claims{
+pub struct Claims {
     pub sub: String,
     pub exp: usize,
 }
-
 
 #[derive(Debug)]
 pub enum MyError {
@@ -185,8 +186,13 @@ async fn handle_websocket_messages(
     websocket: WebSocket,
     bid_tree: Arc<RwLock<RBTree<Fq>>>,
     ask_tree: Arc<RwLock<RBTree<Fq>>>,
+    pubkey: String,
 ) {
     let (mut sender, mut receiver) = websocket.split();
+
+    sender.send(Message::text("Hello from the server!"))
+        .await
+        .unwrap();
 
     while let Some(message) = receiver.next().await {
         if let Ok(msg) = message {
@@ -257,7 +263,7 @@ async fn handle_websocket_messages(
                     };
 
                     let data = Data {
-                        pubkey: U256::from_str_hex("0x0").unwrap(), // example pubkey, replace with actual -- TODO
+                        pubkey: U256::from_str_hex(pubkey.as_str()).unwrap(), // example pubkey, replace with actual -- TODO
                         raw_order: order.clone(),
                         raw_order_commitment: commitment.clone(),
                     };
@@ -402,8 +408,7 @@ async fn handle_websocket_messages(
                         }
 
                         if found {
-                            matches =
-                                match_ask(order.clone(), bid_tree.clone()).await
+                            matches = match_ask(order.clone(), bid_tree.clone()).await
                         } else {
                             matches = None
                         }
@@ -479,9 +484,12 @@ async fn hash_three_values(a: Fq, b: Fq, c: Fq) -> Fq {
     Fq::from_bytes(&bytes).unwrap()
 }
 
-pub async fn handle_request_challenge(state: Arc<AppState>) -> WebResult<impl Reply>{
+pub async fn handle_request_challenge(state: Arc<AppState>) -> WebResult<impl Reply> {
     let challenge_id = generate_challenge_id(); // Implement this function to generate unique challenge IDs
-    let challenge_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+    let challenge_timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     let mut challenges = state.challenges.lock().unwrap();
     challenges.insert(challenge_id.clone(), challenge_timestamp);
     // Send the challenge to the client
@@ -490,23 +498,26 @@ pub async fn handle_request_challenge(state: Arc<AppState>) -> WebResult<impl Re
 
 pub fn generate_challenge_id() -> String {
     let mut rng = rand::thread_rng();
-    let id: String = (0..16)
-    .map(|_| rng.sample(rand::distributions::Alphanumeric) as char)
-    .collect();
+    let bytes: [u8; 32] = rng.gen();
+    let id = format!("0x{}", hex::encode(bytes));
     id
 }
 
-pub async fn handle_submit_response(state: Arc<AppState>, response: ClientResponse)-> WebResult <impl Reply> {
+pub async fn handle_submit_response(
+    state: Arc<AppState>,
+    response: ClientResponse,
+) -> WebResult<impl Reply> {
     let challenges = state.challenges.lock().unwrap();
     if let Some(challenge) = challenges.get(&response.challenge_id) {
-        if current_timestamp() - challenge > 300 { // 5 minutes in seconds
+        if current_timestamp() - challenge > 300 {
+            // 5 minutes in seconds
             return Ok(warp::reply::json(&"Challenge timed out!"));
         }
         return match verify_signature(&response) {
             Ok(_) => {
                 //let jwt = issue_jwt();
                 Ok(warp::reply::json(&create_jwt(&response.pub_key).unwrap()))
-            },
+            }
             Err(_) => Ok(warp::reply::json(&"Invalid signature")),
         };
     } else {
@@ -514,8 +525,7 @@ pub async fn handle_submit_response(state: Arc<AppState>, response: ClientRespon
     }
 }
 
-fn create_jwt(pub_key: &str)->Result<String, MyError>{
-
+fn create_jwt(pub_key: &str) -> Result<String, MyError> {
     let expiration = Utc::now()
         .checked_add_signed(chrono::Duration::seconds(900))
         .expect("valid timestamp")
@@ -526,27 +536,27 @@ fn create_jwt(pub_key: &str)->Result<String, MyError>{
         exp: expiration as usize,
     };
 
-   // let a: &[u8] = b"hello";
+    // let a: &[u8] = b"hello";
 
-    let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET must be set");
-
-    let header=Header::new(Algorithm::HS512);
-    encode(&header, &claims, &EncodingKey::from_secret(jwt_secret.as_bytes()))
+    let header = Header::new(Algorithm::HS512);
+    encode(
+        &header,
+        &claims,
+        &EncodingKey::from_secret(JWT_SECRET),
+    )
     .map_err(|_| MyError::JWTTokenCreationError)
 }
 
 pub fn with_auth() -> impl Filter<Extract = (String,), Error = Rejection> + Clone {
-    headers_cloned()
-        .and_then(authorize)
+    headers_cloned().and_then(authorize)
 }
 
 pub async fn authorize(headers: HeaderMap<HeaderValue>) -> WebResult<String> {
     match jwt_from_header(&headers) {
         Ok(jwt) => {
-            let jwt_secret = env::var("JWT_SECRET").expect("JWT_SECRET must be set");
             let decoded = decode::<Claims>(
                 &jwt,
-                &DecodingKey::from_secret(jwt_secret.as_bytes()),
+                &DecodingKey::from_secret(JWT_SECRET),
                 &Validation::new(Algorithm::HS512),
             )
             .map_err(|_| reject::custom(MyError::JWTTokenError))?;
@@ -555,7 +565,6 @@ pub async fn authorize(headers: HeaderMap<HeaderValue>) -> WebResult<String> {
         Err(e) => return Err(reject::custom(e)),
     }
 }
-
 
 fn jwt_from_header(headers: &HeaderMap<HeaderValue>) -> Result<String, MyError> {
     let header = match headers.get(AUTHORIZATION) {
@@ -572,24 +581,39 @@ fn jwt_from_header(headers: &HeaderMap<HeaderValue>) -> Result<String, MyError> 
     Ok(auth_header.trim_start_matches(BEARER).to_owned())
 }
 
-fn verify_signature(client_response: &ClientResponse) -> Result<(), SignatureError> {
+fn verify_signature(client_response: &ClientResponse) -> Result<(), &'static str> {
     // Decode the hex-encoded signature, message, and public key
     let signature_bytes = hex::decode(strip_0x_prefix(&client_response.signature)).unwrap();
     let message_bytes = hex::decode(strip_0x_prefix(&client_response.challenge_id)).unwrap();
     let pub_key_bytes = hex::decode(strip_0x_prefix(&client_response.pub_key)).unwrap();
 
-    let signature = Signature::try_from(signature_bytes.as_slice()).unwrap();
+   // println!("pubkey: {:?}", &client_response.pub_key);
+   // println!("signature: {:?}", &client_response.signature);
+   // println!("challenge_id: {:?}", &client_response.challenge_id);
 
-    // Hash the message as Ethereum expects
-    let message_hash = keccak256(&message_bytes);
+   // println!("pubkey_bytes: {:?}", pub_key_bytes);
+   // println!("signature_bytes: {:?}", signature_bytes);
+   // println!("message_bytes: {:?}", message_bytes);
 
-    // Convert the provided address to H160 format
-    let provided_address = H160::from_slice(&pub_key_bytes);
+    let message_bytes = eth_message(client_response.challenge_id.clone());
 
-    // Verify the signature using the ethers crate
-    signature.verify(message_hash, provided_address)
+    let recovery_id = signature_bytes[64] as i32 - 27;
+
+    let pubkey = recover(&message_bytes, &signature_bytes[..64], recovery_id);
+
+    let pubkey = pubkey.unwrap();
+    let pubkey = format!("{:02X?}", pubkey);
+    let recovered_pub_key_bytes = hex::decode(strip_0x_prefix(&pubkey)).unwrap();
+
+    println!("pubkey: {:?}", pubkey);
+
+    if recovered_pub_key_bytes==pub_key_bytes {
+        Ok(())
+    } else {
+        Err("Values are not equal")
+    }
+
 }
-
 
 fn strip_0x_prefix(hex_str: &str) -> &str {
     if hex_str.starts_with("0x") {
@@ -599,25 +623,39 @@ fn strip_0x_prefix(hex_str: &str) -> &str {
     }
 }
 
-fn current_timestamp() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+pub fn eth_message(message: String) -> [u8; 32] {
+    keccak256(
+        format!(
+            "{}{}{}",
+            "\x19Ethereum Signed Message:\n",
+            message.len(),
+            message
+        )
+        .as_bytes(),
+    )
 }
 
+fn current_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
 
 #[tokio::main]
 async fn main() {
     // let clients = Clients::new(Mutex::new(HashMap::new()));
     let state = Arc::new(AppState {
-        challenges: Mutex::new(HashMap::new())
+        challenges: Mutex::new(HashMap::new()),
     });
 
     let state_req_challenge = state.clone();
     let state_sub_response = state.clone();
 
     let request_challenge = warp::post()
-    .and(warp::path("request_challenge"))
-    .and(warp::any().map(move || state_req_challenge.clone()))
-    .and_then(handle_request_challenge);
+        .and(warp::path("request_challenge"))
+        .and(warp::any().map(move || state_req_challenge.clone()))
+        .and_then(handle_request_challenge);
 
     let submit_response = warp::post()
         .and(warp::path("submit_response"))
@@ -647,22 +685,43 @@ async fn main() {
 
     pretty_env_logger::init();
 
-    let ws_with_auth = warp::path("ws_auth")
-        .and(warp::ws())
-        .and(with_auth())
-        .map(|ws: warp::ws::Ws, pubkey: String| {
-            ws.on_upgrade(move |socket| handle_success(socket, pubkey))
-        });
+    /* let ws_with_auth = warp::path("ws_auth")
+    .and(warp::ws())
+    .and(with_auth())
+    .map(|ws: warp::ws::Ws, pubkey: String| {
+        ws.on_upgrade(move |socket| handle_success(socket, pubkey))
+    }); */
 
-
-    let routes = warp::path("ws")
+    let ws_route = warp::path("ws")
         .and(warp::ws())
         .and(bid_tree)
         .and(ask_tree)
-        .map(|ws: warp::ws::Ws, bid_tree, ask_tree| {
-            ws.on_upgrade(move |socket| handle_websocket_messages(socket, bid_tree, ask_tree))
+        .and(with_auth())
+        .map(|ws: warp::ws::Ws, bid_tree, ask_tree, pubkey: String| {
+            ws.on_upgrade(move |socket| {
+                handle_websocket_messages(socket, bid_tree, ask_tree, pubkey)
+            })
         });
     // Then in your main function:
+
+    /*let routes = warp::path("ws")
+    .and(warp::ws())
+    .and(warp::header::headers_cloned())
+    .map(|ws: warp::ws::Ws, headers: warp::http::HeaderMap| {
+        println!("{:?}", headers);
+        ws.on_upgrade(|websocket| {
+            // Handle the websocket connection here
+            // For example, you can just echo back all received messages:
+            let (tx, rx) = websocket.split();
+            rx.forward(tx).map(|result| {
+                if let Err(e) = result {
+                    eprintln!("websocket error: {:?}", e);
+                }
+            })
+        })
+    }); */
+
+    let routes = request_challenge.or(submit_response).or(ws_route);
 
     warp::serve(routes).run(([0, 0, 0, 0], 8000)).await;
 }
