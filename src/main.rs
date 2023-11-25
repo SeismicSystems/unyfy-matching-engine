@@ -32,6 +32,7 @@ use unyfy_matching_engine::models::*;
 use unyfy_matching_engine::raw_order::*;
 use warp::ws::WebSocket;
 use warp::Reply;
+use std::fmt::Debug;
 // use ethers::utils::keccak256;
 use chrono::prelude::*;
 use dotenv::dotenv;
@@ -114,6 +115,12 @@ type ResultUtil<T> = std::result::Result<T, Rejection>;
 type Clients = Arc<Mutex<HashMap<String, Client>>>;
 // type Result<T> = std::result::Result<T, error::Error>;
 type WebResult<T> = std::result::Result<T, Rejection>;
+
+async fn clear_orderbook<T: Ord + Debug + Copy>(tree: &Arc<RwLock<RBTree<T>>>) {
+    let mut tree = tree.write().await;
+    tree.root = None;
+    tree.count = 0;
+}
 
 async fn read_and_insert(
     file_path: &Path,
@@ -465,6 +472,11 @@ async fn handle_websocket_messages(
 
                     let message = Message::text(payload.to_string());
                     sender.send(message).await.unwrap();
+                }
+                else if json_msg["action"] == "clearorderbook" {
+                    clear_orderbook(&bid_tree).await;
+                    clear_orderbook(&ask_tree).await;
+                    sender.send(Message::text("Orderbook cleared")).await.unwrap();
                 }
             }
         }

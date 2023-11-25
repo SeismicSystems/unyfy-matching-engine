@@ -47,7 +47,7 @@ console.log("The wallet address is: ", address);
 
 // Send a post request to localhost:8000/request_challenge
 
-axios.post('http://localhost:8000/request_challenge')
+axios.post('http://44.201.111.37:8000/request_challenge')
 .then(function (response) {
     // console.log(response);
     // Convert the response to a string
@@ -58,7 +58,7 @@ axios.post('http://localhost:8000/request_challenge')
         console.log("The message has been signed with the signature: ", signature);
         console.log("Sending signature to server for verification and JWT issuance...");
         // Send the response, signature and public address back to localhost:8000/submit_response
-        axios.post('http://localhost:8000/submit_response', {
+        axios.post('http://44.201.111.37:8000/submit_response', {
             "challenge_id": responseString,
             "signature": signature,
             "pub_key": address
@@ -72,7 +72,7 @@ axios.post('http://localhost:8000/request_challenge')
                 'Authorization': 'Bearer ' + responseString
             };
             console.log("Opening WebSocket connection...");
-            const ws = new WebSocket('ws://localhost:8000/ws', { headers });
+            const ws = new WebSocket('ws://44.201.111.37:8000/ws', { headers });
             ws.on('open', function open() {
                 console.log('Connected to the server!');
                 // Send the request when the connection is opened
