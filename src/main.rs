@@ -218,19 +218,23 @@ async fn handle_websocket_messages(
                     let volume_str = json_msg["data"]["shielded"]["volume"].as_str().unwrap();
                     let access_key_str =
                         json_msg["data"]["shielded"]["accessKey"].as_str().unwrap();
+                    let hash_str = json_msg["hash"].as_str().unwrap();
                     // Parse the strings into BigUint, assuming decimal format
                     let price = BigUint::parse_bytes(price_str.as_bytes(), 10).unwrap();
                     let volume = BigUint::parse_bytes(volume_str.as_bytes(), 10).unwrap();
                     let access_key = BigUint::parse_bytes(access_key_str.as_bytes(), 16).unwrap();
-
+                    let hash = BigUint::parse_bytes(hash_str.as_bytes(), 16).unwrap();
+                    
                     let price_bytes_vec = price.to_bytes_le();
                     let volume_bytes_vec = volume.to_bytes_le();
                     let access_key_bytes_vec = access_key.to_bytes_le();
+                    let hash_bytes_vec = hash.to_bytes_le();
 
                     // Convert BigUint to [u8; 32] in little-endian format
                     let mut price_bytes = [0u8; 32];
                     let mut volume_bytes = [0u8; 32];
                     let mut access_key_bytes = [0u8; 32];
+                    let mut hash_bytes = [0u8; 32];
                     for (i, byte) in price_bytes_vec.iter().enumerate() {
                         price_bytes[i] = *byte;
                     }
@@ -241,6 +245,10 @@ async fn handle_websocket_messages(
 
                     for (i, byte) in access_key_bytes_vec.iter().enumerate() {
                         access_key_bytes[i] = *byte;
+                    }
+
+                    for (i, byte) in hash_bytes_vec.iter().enumerate() {
+                        hash_bytes[i] = *byte;
                     }
 
                     let token = json_msg["data"]["transparent"]["token"].as_str().unwrap();
@@ -263,11 +271,13 @@ async fn handle_websocket_messages(
                         },
                     };
 
-                    let hash = hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
+                 //   let hash = hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
+
+                    let hash_value = Fq::from_bytes(&hash_bytes).unwrap();
 
                     let commitment = Commitment {
                         public: order.t.clone(),
-                        private: hash,
+                        private: hash_value,
                     };
 
                     let data = Data {
@@ -307,6 +317,8 @@ async fn handle_websocket_messages(
                     let commitment_return =
                         BigUint::from_bytes_le(&commitment.private.to_bytes()).to_str_radix(10);
 
+                    
+
                     // Construct the JSON payload
                     let payload = json!({
                         "action": "sendorder",
@@ -335,19 +347,22 @@ async fn handle_websocket_messages(
                     let volume_str = json_msg["data"]["shielded"]["volume"].as_str().unwrap();
                     let access_key_str =
                         json_msg["data"]["shielded"]["accessKey"].as_str().unwrap();
+                    let hash_str = json_msg["hash"].as_str().unwrap();
                     // Parse the strings into BigUint, assuming decimal format
                     let price = BigUint::parse_bytes(price_str.as_bytes(), 10).unwrap();
                     let volume = BigUint::parse_bytes(volume_str.as_bytes(), 10).unwrap();
                     let access_key = BigUint::parse_bytes(access_key_str.as_bytes(), 10).unwrap();
+                    let hash = BigUint::parse_bytes(hash_str.as_bytes(), 16).unwrap();
 
                     let price_bytes_vec = price.to_bytes_le();
                     let volume_bytes_vec = volume.to_bytes_le();
                     let access_key_bytes_vec = access_key.to_bytes_le();
-
+                    let hash_bytes_vec = hash.to_bytes_le();
                     // Convert BigUint to [u8; 32] in little-endian format
                     let mut price_bytes = [0u8; 32];
                     let mut volume_bytes = [0u8; 32];
                     let mut access_key_bytes = [0u8; 32];
+                    let mut hash_bytes = [0u8; 32];
                     for (i, byte) in price_bytes_vec.iter().enumerate() {
                         price_bytes[i] = *byte;
                     }
@@ -358,6 +373,10 @@ async fn handle_websocket_messages(
 
                     for (i, byte) in access_key_bytes_vec.iter().enumerate() {
                         access_key_bytes[i] = *byte;
+                    }
+
+                    for (i, byte) in hash_bytes_vec.iter().enumerate() {
+                        hash_bytes[i] = *byte;
                     }
 
                     let token = json_msg["data"]["transparent"]["token"].as_str().unwrap();
@@ -380,11 +399,11 @@ async fn handle_websocket_messages(
                         },
                     };
 
-                    let hash = hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
+                   // let hash = hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
 
                     let commitment = Commitment {
                         public: order.t.clone(),
-                        private: hash,
+                        private: Fq::from_bytes(&hash_bytes).unwrap(),
                     };
 
                     let data = Data {
@@ -437,8 +456,7 @@ async fn handle_websocket_messages(
                     match matches {
                         Some(matches) => {
                             for order in matches {
-                                let hash =
-                                    hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
+                                let hash = Fq::from_bytes(&hash_bytes).unwrap();
                                 let order_json = json!({
                                     "raw_order": {
                                         "t": {
@@ -690,13 +708,13 @@ async fn main() {
         ask_tree: Arc::new(RwLock::new(RBTree::new())),
     };
 
-    let file_path = Path::new("orders.txt");
+    /*let file_path = Path::new("orders.txt");
     read_and_insert(
         &file_path,
         orderbook.bid_tree.clone(),
         orderbook.ask_tree.clone(),
     )
-    .await;
+    .await; */ 
 
     // let safe_orderbook = SafeOrderbook::new(RwLock::new(orderbook));
 
