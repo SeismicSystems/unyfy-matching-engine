@@ -22,6 +22,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 // use std::error::Error;
 use ethers::prelude::*;
+use std::fmt::Debug;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -32,7 +33,6 @@ use unyfy_matching_engine::models::*;
 use unyfy_matching_engine::raw_order::*;
 use warp::ws::WebSocket;
 use warp::Reply;
-use std::fmt::Debug;
 // use ethers::utils::keccak256;
 use chrono::prelude::*;
 use dotenv::dotenv;
@@ -197,7 +197,8 @@ async fn handle_websocket_messages(
 ) {
     let (mut sender, mut receiver) = websocket.split();
 
-    sender.send(Message::text("Hello from the server!"))
+    sender
+        .send(Message::text("Hello from the server!"))
         .await
         .unwrap();
 
@@ -220,7 +221,7 @@ async fn handle_websocket_messages(
                     // Parse the strings into BigUint, assuming decimal format
                     let price = BigUint::parse_bytes(price_str.as_bytes(), 10).unwrap();
                     let volume = BigUint::parse_bytes(volume_str.as_bytes(), 10).unwrap();
-                    let access_key = BigUint::parse_bytes(access_key_str.as_bytes(), 10).unwrap();
+                    let access_key = BigUint::parse_bytes(access_key_str.as_bytes(), 16).unwrap();
 
                     let price_bytes_vec = price.to_bytes_le();
                     let volume_bytes_vec = volume.to_bytes_le();
@@ -403,8 +404,15 @@ async fn handle_websocket_messages(
                         }
 
                         if found {
-                            matches =
-                                Some(match_bid(order.clone(), ask_tree.clone()).await.unwrap());
+                            matches = Some(
+                                match_bid(
+                                    order.clone(),
+                                    U256::from_str_hex(pubkey.as_str()).unwrap(),
+                                    ask_tree.clone(),
+                                )
+                                .await
+                                .unwrap(),
+                            );
                         } else {
                             matches = None
                         }
@@ -415,7 +423,12 @@ async fn handle_websocket_messages(
                         }
 
                         if found {
-                            matches = match_ask(order.clone(), bid_tree.clone()).await
+                            matches = match_ask(
+                                order.clone(),
+                                U256::from_str_hex(pubkey.as_str()).unwrap(),
+                                bid_tree.clone(),
+                            )
+                            .await
                         } else {
                             matches = None
                         }
@@ -472,11 +485,13 @@ async fn handle_websocket_messages(
 
                     let message = Message::text(payload.to_string());
                     sender.send(message).await.unwrap();
-                }
-                else if json_msg["action"] == "clearorderbook" {
+                } else if json_msg["action"] == "clearorderbook" {
                     clear_orderbook(&bid_tree).await;
                     clear_orderbook(&ask_tree).await;
-                    sender.send(Message::text("Orderbook cleared")).await.unwrap();
+                    sender
+                        .send(Message::text("Orderbook cleared"))
+                        .await
+                        .unwrap();
                 }
             }
         }
@@ -551,12 +566,8 @@ fn create_jwt(pub_key: &str) -> Result<String, MyError> {
     // let a: &[u8] = b"hello";
 
     let header = Header::new(Algorithm::HS512);
-    encode(
-        &header,
-        &claims,
-        &EncodingKey::from_secret(JWT_SECRET),
-    )
-    .map_err(|_| MyError::JWTTokenCreationError)
+    encode(&header, &claims, &EncodingKey::from_secret(JWT_SECRET))
+        .map_err(|_| MyError::JWTTokenCreationError)
 }
 
 pub fn with_auth() -> impl Filter<Extract = (String,), Error = Rejection> + Clone {
@@ -599,13 +610,13 @@ fn verify_signature(client_response: &ClientResponse) -> Result<(), &'static str
     let message_bytes = hex::decode(strip_0x_prefix(&client_response.challenge_id)).unwrap();
     let pub_key_bytes = hex::decode(strip_0x_prefix(&client_response.pub_key)).unwrap();
 
-   // println!("pubkey: {:?}", &client_response.pub_key);
-   // println!("signature: {:?}", &client_response.signature);
-   // println!("challenge_id: {:?}", &client_response.challenge_id);
+    // println!("pubkey: {:?}", &client_response.pub_key);
+    // println!("signature: {:?}", &client_response.signature);
+    // println!("challenge_id: {:?}", &client_response.challenge_id);
 
-   // println!("pubkey_bytes: {:?}", pub_key_bytes);
-   // println!("signature_bytes: {:?}", signature_bytes);
-   // println!("message_bytes: {:?}", message_bytes);
+    // println!("pubkey_bytes: {:?}", pub_key_bytes);
+    // println!("signature_bytes: {:?}", signature_bytes);
+    // println!("message_bytes: {:?}", message_bytes);
 
     let message_bytes = eth_message(client_response.challenge_id.clone());
 
@@ -619,12 +630,11 @@ fn verify_signature(client_response: &ClientResponse) -> Result<(), &'static str
 
     println!("pubkey: {:?}", pubkey);
 
-    if recovered_pub_key_bytes==pub_key_bytes {
+    if recovered_pub_key_bytes == pub_key_bytes {
         Ok(())
     } else {
         Err("Values are not equal")
     }
-
 }
 
 fn strip_0x_prefix(hex_str: &str) -> &str {

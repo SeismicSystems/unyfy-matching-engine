@@ -13,7 +13,7 @@ const orderDetails = {
     hash: orderLines[4].split('=')[1].trim(),
 };
 
-const ws = new WebSocket('ws://localhost:8000/ws', {
+const ws = new WebSocket('localhost:8000/ws', {
     headers: { Authorization: `Bearer ${jwt}` }
 });
 

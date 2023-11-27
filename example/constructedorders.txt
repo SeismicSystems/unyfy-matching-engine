@@ -1,0 +1,18 @@
+price = 100
+volume = 1
+side = 1
+access_key = 25025777207
+hash = 50d8817b7a8b4c2ac7852998f5bf3e
+--
+price = 101.22
+volume = 5
+side = 0
+access_key = 288143488617
+hash = 3612f279faae70124f887e6f4144e3
+--
+price = 102.44
+volume = 6
+side = 0
+access_key = 387224318544
+hash = d33219bcc4e49a6fe092a11a2e33c5
+--

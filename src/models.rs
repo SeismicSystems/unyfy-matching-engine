@@ -1,6 +1,7 @@
 #![allow(dead_code, unused_variables)]
 
 use crate::raw_order::*;
+use ethers::abi::Hash;
 // use ark_bn254::Fr as Fq;
 use halo2curves::bn256::Fr as Fq;
 
@@ -30,6 +31,34 @@ pub struct Data {
     pub raw_order_commitment: Commitment,
 }
 
+impl Data {
+    pub fn default() -> Self {
+        Data {
+            pubkey: U256::from(0 as u16),
+            raw_order: Order {
+                t: TransparentStructure {
+                    phi: Fq::zero(),
+                    chi: String::from(""),
+                    d: String::from(""),
+                },
+                s: ShieldedStructure {
+                    p: Fq::zero(),
+                    v: Fq::zero(),
+                    alpha: Fq::zero(),
+                },
+            },
+            raw_order_commitment: Commitment {
+                public: TransparentStructure {
+                    phi: Fq::zero(),
+                    chi: String::from(""),
+                    d: String::from(""),
+                },
+                private: Fq::zero(),
+            },
+        }
+    }
+}
+
 pub struct Orderbook<T: Ord + Debug + Clone + Copy> {
     pub bid_tree: Arc<RwLock<RBTree<T>>>,
     pub ask_tree: Arc<RwLock<RBTree<T>>>,
@@ -47,7 +76,7 @@ pub struct Node<T> {
     pub parent: LimitNodePtr<T>,
     pub left: LimitNodePtr<T>,
     pub right: LimitNodePtr<T>,
-    pub orders: HashMap<U256, HashMap<Commitment, Order>>,
+    pub orders: HashMap<Fq, HashMap<Commitment, (Order, U256)>>,
 }
 
 impl<T> Node<T>
@@ -66,8 +95,11 @@ where
             orders: {
                 let mut outer_map = HashMap::new();
                 let mut inner_map = HashMap::new();
-                inner_map.insert(data.raw_order_commitment, data.raw_order);
-                outer_map.insert(data.pubkey, inner_map);
+                inner_map.insert(
+                    data.raw_order_commitment.clone(),
+                    (data.raw_order, data.pubkey),
+                );
+                outer_map.insert(data.raw_order_commitment.private, inner_map);
                 outer_map
             },
         })))
@@ -101,6 +133,7 @@ enum Direction {
 pub struct RBTree<T: Ord + Debug + Copy> {
     pub root: LimitNodePtr<T>,
     pub count: u32,
+    pub map: HashMap<Fq, Fq>, // <hash, price> hashmap
 }
 
 impl<T> RBTree<T>
@@ -111,6 +144,7 @@ where
         RBTree {
             root: None,
             count: 0,
+            map: HashMap::new(),
         }
     }
 
@@ -130,20 +164,29 @@ where
         if self.search(price, data.clone()).await.is_none() {
             // need to pass Tree<T> along with RBTree<T> or else we can't call associated functions
             let root = replace(&mut self.root, None);
-            let updated_tree = self.insert_node(root, price, data).await;
+            let updated_tree = self.insert_node(root, price, data.clone()).await;
             self.root = self.insert_fix(updated_tree.1).await;
+            self.map
+                .insert(data.raw_order_commitment.private, data.raw_order.s.p);
         } else {
             let x = self.search(price, data.clone()).await;
             let raw_order_clone = data.raw_order.clone();
             let mut inner_map = HashMap::new();
-            inner_map.insert(data.raw_order_commitment, data.raw_order);
+            inner_map.insert(
+                data.raw_order_commitment.clone(),
+                (data.raw_order.clone(), data.pubkey),
+            );
             if let Some(node) = x {
                 let mut node_guard = node.write().await;
-                node_guard.orders.insert(data.pubkey, inner_map);
+                node_guard
+                    .orders
+                    .insert(data.raw_order_commitment.private, inner_map);
                 node_guard.size += 1;
                 node_guard.value_sum += raw_order_clone.s.p * raw_order_clone.s.v;
                 node_guard.size += 1;
             }
+            self.map
+                .insert(data.raw_order_commitment.private, data.raw_order.s.p);
         }
     }
 
@@ -503,9 +546,9 @@ where
         let node = self.search_node(&self.root, &dummy).await;
         if node.is_some() {
             let node_orders = node.as_ref().unwrap().read().await.orders.clone();
-            if node_orders.contains_key(&data.pubkey) {
+            if node_orders.contains_key(&data.raw_order_commitment.private) {
                 if node_orders
-                    .get(&data.pubkey)
+                    .get(&data.raw_order_commitment.private)
                     .unwrap()
                     .contains_key(&data.raw_order_commitment)
                 {
@@ -514,6 +557,32 @@ where
             }
         }
         None
+    }
+
+    pub async fn delete_hash(&mut self, hash: Fq) {
+        if self.map.contains_key(&hash) {
+            let price = self.map.get(&hash).unwrap();
+            let dummy = Node::<T>::new(*price, Data::default())
+                .unwrap()
+                .write()
+                .await
+                .clone();
+            let node = self.search_node(&self.root, &dummy).await;
+            if node.is_some() {
+                let node_orders = node.as_ref().unwrap().read().await.orders.clone();
+                if node_orders.contains_key(&hash) {
+                    let inner_map = node_orders.get(&hash).unwrap();
+                    let (first_key, first_value) = inner_map.iter().next().unwrap();
+                    let data = Data {
+                        pubkey: first_value.1,
+                        raw_order: first_value.0.clone(),
+                        raw_order_commitment: first_key.clone(),
+                    };
+                    self.delete(node.as_ref().unwrap().read().await.price, data)
+                        .await;
+                }
+            }
+        }
     }
 
     // 2- delete a node from the red-black tree
@@ -615,11 +684,12 @@ where
                 .write()
                 .await
                 .orders
-                .get_mut(&data.pubkey)
+                .get_mut(&data.raw_order_commitment.private)
             {
                 inner_map.remove(&data.raw_order_commitment);
             }
             z.as_ref().unwrap().write().await.size -= 1;
+            self.map.remove(&data.raw_order_commitment.private);
         }
     }
 

@@ -5,7 +5,7 @@ import * as fs from 'fs';
 
 const envData = fs.readFileSync('.env', 'utf8');
 const privateKey = envData.split('\n')[0].split('=')[1];
-console.log(privateKey);
+// console.log(privateKey);
 const wallet = new Wallet(privateKey);
 
 const challenge = fs.readFileSync('challenge.txt', 'utf8');

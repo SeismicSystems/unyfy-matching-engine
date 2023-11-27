@@ -4,6 +4,7 @@ use crate::models::{LimitNodePtr, Node};
 use crate::raw_order::Order;
 use crate::raw_order::ShieldedStructure;
 use async_recursion::async_recursion;
+use ethnum::U256;
 use halo2curves::bn256::Fr as Fq;
 use halo2curves::ff::Field;
 use std::fmt::Debug;
@@ -13,7 +14,11 @@ use tokio::sync::RwLock;
 
 // TODO -- insert the order
 
-pub async fn match_bid<T>(order: Order, ask_tree: Arc<RwLock<RBTree<T>>>) -> Option<Vec<Order>>
+pub async fn match_bid<T>(
+    order: Order,
+    pubkey: U256,
+    ask_tree: Arc<RwLock<RBTree<T>>>,
+) -> Option<Vec<Order>>
 where
     T: Ord + Clone + Debug + Copy,
 {
@@ -30,30 +35,35 @@ where
         if node.price <= order.s.p && target_volume > Fq::from(0) {
             if node.value_sum <= target_volume {
                 for (_, order_map) in &node.orders {
-                    for (_, order) in order_map {
-                        matched_orders.push(order.clone());
+                    for (_, order_tuple) in order_map {
+                        if order_tuple.1 != pubkey {
+                            matched_orders.push(order_tuple.0.clone());
+                        }
                     }
                 }
                 target_volume = target_volume - node.value_sum;
             } else {
                 for (_, order_map) in &node.orders {
-                    for (_, order) in order_map {
-                        if (order.s.p * order.s.v) <= target_volume {
-                            matched_orders.push(order.clone());
-                            target_volume = target_volume - (order.s.v * order.s.p);
-                        } else {
-                            let order_clone_volume = (target_volume * order.s.p.invert().unwrap())
-                                + Fq::from(1000000000);
-                            let order_clone = Order {
-                                t: order.t.clone(),
-                                s: ShieldedStructure {
-                                    p: order.s.p,
-                                    v: order_clone_volume,
-                                    alpha: order.s.alpha,
-                                },
-                            };
-                            matched_orders.push(order_clone);
-                            target_volume = Fq::from(0);
+                    for (_, order_tuple) in order_map {
+                        if order_tuple.1 != pubkey {
+                            if (order_tuple.0.s.p * order_tuple.0.s.v) <= target_volume {
+                                matched_orders.push(order_tuple.0.clone());
+                                target_volume = target_volume - (order.s.v * order.s.p);
+                            } else {
+                                let order_clone_volume = (target_volume
+                                    * order_tuple.0.s.p.invert().unwrap())
+                                    + Fq::from(1000000000);
+                                let order_clone = Order {
+                                    t: order_tuple.0.t.clone(),
+                                    s: ShieldedStructure {
+                                        p: order_tuple.0.s.p,
+                                        v: order_clone_volume,
+                                        alpha: order_tuple.0.s.alpha,
+                                    },
+                                };
+                                matched_orders.push(order_clone);
+                                target_volume = Fq::from(0);
+                            }
                         }
                     }
                 }
@@ -68,7 +78,11 @@ where
     }
 }
 
-pub async fn match_ask<T>(order: Order, bid_tree: Arc<RwLock<RBTree<T>>>) -> Option<Vec<Order>>
+pub async fn match_ask<T>(
+    order: Order,
+    pubkey: U256,
+    bid_tree: Arc<RwLock<RBTree<T>>>,
+) -> Option<Vec<Order>>
 where
     T: Ord + Clone + Debug + Copy,
 {
@@ -85,30 +99,35 @@ where
         if node.price >= order.s.p && target_volume > Fq::from(0) {
             if node.value_sum <= target_volume {
                 for (_, order_map) in &node.orders {
-                    for (_, order) in order_map {
-                        matched_orders.push(order.clone());
+                    for (_, order_tuple) in order_map {
+                        if order_tuple.1 != pubkey {
+                            matched_orders.push(order_tuple.0.clone());
+                        }
                     }
                 }
                 target_volume = target_volume - node.value_sum;
             } else {
                 for (_, order_map) in &node.orders {
-                    for (_, order) in order_map {
-                        if (order.s.p * order.s.v) <= target_volume {
-                            matched_orders.push(order.clone());
-                            target_volume = target_volume - (order.s.v * order.s.p);
-                        } else {
-                            let order_clone_volume = (target_volume * order.s.p.invert().unwrap())
-                                + Fq::from(1000000000);
-                            let order_clone = Order {
-                                t: order.t.clone(),
-                                s: ShieldedStructure {
-                                    p: order.s.p,
-                                    v: order_clone_volume,
-                                    alpha: order.s.alpha,
-                                },
-                            };
-                            matched_orders.push(order_clone);
-                            target_volume = Fq::from(0);
+                    for (_, order_tuple) in order_map {
+                        if order_tuple.1 != pubkey {
+                            if (order_tuple.0.s.p * order_tuple.0.s.v) <= target_volume {
+                                matched_orders.push(order_tuple.0.clone());
+                                target_volume = target_volume - (order.s.v * order.s.p);
+                            } else {
+                                let order_clone_volume = (target_volume
+                                    * order_tuple.0.s.p.invert().unwrap())
+                                    + Fq::from(1000000000);
+                                let order_clone = Order {
+                                    t: order_tuple.0.t.clone(),
+                                    s: ShieldedStructure {
+                                        p: order.s.p,
+                                        v: order_clone_volume,
+                                        alpha: order.s.alpha,
+                                    },
+                                };
+                                matched_orders.push(order_clone);
+                                target_volume = Fq::from(0);
+                            }
                         }
                     }
                 }
