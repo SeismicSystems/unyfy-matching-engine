@@ -2,6 +2,7 @@ use ark_ff::BigInt;
 use futures_util::stream::StreamExt;
 use futures_util::TryFutureExt;
 use futures_util::{FutureExt, SinkExt};
+use std::fs::read_to_string;
 use halo2curves::ff::Field;
 use num_bigint::{BigUint, ToBigUint};
 use serde_derive::{Deserialize, Serialize};
@@ -47,7 +48,9 @@ use warp::{
     http::header::{HeaderMap, HeaderValue, AUTHORIZATION},
     reject, Filter, Rejection,
 };
-use web3::signing::{keccak256, recover};
+use web3::signing::{keccak256, recover, Key};
+use ethsign::{PublicKey, SecretKey, Signature};
+
 
 const BEARER: &str = "Bearer ";
 
@@ -195,6 +198,7 @@ async fn handle_websocket_messages(
     ask_tree: Arc<RwLock<RBTree<Fq>>>,
     pubkey: String,
 ) {
+    
     let (mut sender, mut receiver) = websocket.split();
 
     sender
@@ -224,7 +228,7 @@ async fn handle_websocket_messages(
                     let volume = BigUint::parse_bytes(volume_str.as_bytes(), 10).unwrap();
                     let access_key = BigUint::parse_bytes(access_key_str.as_bytes(), 16).unwrap();
                     let hash = BigUint::parse_bytes(hash_str.as_bytes(), 16).unwrap();
-                    
+
                     let price_bytes_vec = price.to_bytes_le();
                     let volume_bytes_vec = volume.to_bytes_le();
                     let access_key_bytes_vec = access_key.to_bytes_le();
@@ -271,7 +275,7 @@ async fn handle_websocket_messages(
                         },
                     };
 
-                 //   let hash = hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
+                    //   let hash = hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
 
                     let hash_value = Fq::from_bytes(&hash_bytes).unwrap();
 
@@ -315,10 +319,22 @@ async fn handle_websocket_messages(
                     let side_return =
                         BigUint::from_bytes_le(&order.t.phi.to_bytes()).to_str_radix(10);
                     let commitment_return =
-                        BigUint::from_bytes_le(&commitment.private.to_bytes()).to_str_radix(10);
+                        BigUint::from_bytes_le(&commitment.private.to_bytes()).to_str_radix(16);
 
+
+                    /*let signature: Signature = enclave_private_key.sign(&eth_message(hash_str.to_string())).unwrap();
+
+                    let r = signature.r;
+                    let s = signature.s;
+                    let v = signature.v;
+                    let mut combined = Vec::new();
+combined.extend(&r);
+combined.extend(&s);
+combined.extend(&[v]); */
+
+
+// let signature_hex = format!("0x{}", hex::encode(combined));
                     
-
                     // Construct the JSON payload
                     let payload = json!({
                         "action": "sendorder",
@@ -331,7 +347,7 @@ async fn handle_websocket_messages(
                                 },
                                 "shielded": commitment_return,
                             },
-                            "signatureValue": "Yes"
+                            "signatureValue": "yes"
                         }
                     });
 
@@ -399,7 +415,7 @@ async fn handle_websocket_messages(
                         },
                     };
 
-                   // let hash = hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
+                    // let hash = hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
 
                     let commitment = Commitment {
                         public: order.t.clone(),
@@ -510,6 +526,103 @@ async fn handle_websocket_messages(
                         .send(Message::text("Orderbook cleared"))
                         .await
                         .unwrap();
+                } else if json_msg["action"] == "openorders" {
+                    let bid_orders = bid_tree
+                        .write()
+                        .await
+                        .get_orders_by_pubkey(U256::from_str_hex(pubkey.as_str()).unwrap())
+                        .await;
+                    let ask_orders = ask_tree
+                        .write()
+                        .await
+                        .get_orders_by_pubkey(U256::from_str_hex(pubkey.as_str()).unwrap())
+                        .await;
+                    println!("bid orders: {:?}", bid_orders);
+                    println!("ask orders: {:?}", ask_orders);
+                    let mut json_array = serde_json::Value::Array(Vec::new());
+                    for order in bid_orders {
+                        // let hash = Fq::from_bytes(&hash_bytes).unwrap();
+                        let order_json = json!({
+                            "raw_order": {
+                                "t": {
+                                    "phi": BigUint::from_bytes_le(&order.t.phi.to_bytes()).to_str_radix(10),
+                                    "chi": order.t.chi,
+                                    "d": order.t.d,
+                                },
+                                "s": {
+                                    "p": BigUint::from_bytes_le(&order.s.p.to_bytes()).to_str_radix(10),
+                                    "v": BigUint::from_bytes_le(&order.s.v.to_bytes()).to_str_radix(10),
+                                    "alpha": BigUint::from_bytes_le(&order.s.alpha.to_bytes()).to_str_radix(10),
+                                },
+                            },
+                        });
+                        json_array.as_array_mut().unwrap().push(order_json);
+                    }
+
+                    for order in ask_orders {
+                        // let hash = Fq::from_bytes(&hash_bytes).unwrap();
+                        let order_json = json!({
+                            "raw_order": {
+                                "t": {
+                                    "phi": BigUint::from_bytes_le(&order.t.phi.to_bytes()).to_str_radix(10),
+                                    "chi": order.t.chi,
+                                    "d": order.t.d,
+                                },
+                                "s": {
+                                    "p": BigUint::from_bytes_le(&order.s.p.to_bytes()).to_str_radix(10),
+                                    "v": BigUint::from_bytes_le(&order.s.v.to_bytes()).to_str_radix(10),
+                                    "alpha": BigUint::from_bytes_le(&order.s.alpha.to_bytes()).to_str_radix(10),
+                                },
+                            },
+                        });
+                        json_array.as_array_mut().unwrap().push(order_json);
+                    }
+
+                    // Construct the JSON payload
+                    let payload = json!({
+                        "action": "openorders",
+                        "data": {
+                            "orders": json_array,
+                        }
+                    });
+
+                    let message = Message::text(payload.to_string());
+                    sender.send(message).await.unwrap();
+                }
+                else if json_msg["action"]=="fillorders"{
+                    let side = json_msg["data"]["side"].as_str().unwrap();
+                    let side_num = side.to_string().parse::<u64>().unwrap();
+                    let hash_own_str = json_msg["data"]["hash_own"].as_str().unwrap();
+                    let hash_own_bytes = BigUint::parse_bytes(hash_own_str.as_bytes(), 16).unwrap().to_bytes_le();
+                    let mut hash_own_array = [0u8; 32];
+                    for (i, byte) in hash_own_bytes.iter().enumerate() {
+                        hash_own_array[i] = *byte;
+                    }
+                    let hash_own = Fq::from_bytes(&hash_own_array).unwrap();
+
+                    let hash_matched = json_msg["data"]["hash_matched"].as_array().unwrap().iter().map(|x| {
+                        let hash_str = x.as_str().unwrap();
+                        let hash_bytes = BigUint::parse_bytes(hash_str.as_bytes(), 16).unwrap().to_bytes_le();
+                        let mut hash_array = [0u8; 32];
+                        for (i, byte) in hash_bytes.iter().enumerate() {
+                            hash_array[i] = *byte;
+                        }
+                        Fq::from_bytes(&hash_array).unwrap()
+                    }).collect::<Vec<Fq>>();
+
+                    if side_num==0{
+                        bid_tree.write().await.delete_hash(hash_own).await;
+                        for hash in hash_matched{
+                            ask_tree.write().await.delete_hash(hash).await;
+                        }
+                    }
+                    else{
+                        ask_tree.write().await.delete_hash(hash_own).await;
+                        for hash in hash_matched{
+                            bid_tree.write().await.delete_hash(hash).await;
+                        }
+                    }
+
                 }
             }
         }
@@ -684,6 +797,7 @@ fn current_timestamp() -> u64 {
 
 #[tokio::main]
 async fn main() {
+    // Read public and private keys from .env file
     // let clients = Clients::new(Mutex::new(HashMap::new()));
     let state = Arc::new(AppState {
         challenges: Mutex::new(HashMap::new()),
@@ -714,7 +828,7 @@ async fn main() {
         orderbook.bid_tree.clone(),
         orderbook.ask_tree.clone(),
     )
-    .await; */ 
+    .await; */
 
     // let safe_orderbook = SafeOrderbook::new(RwLock::new(orderbook));
 
@@ -722,6 +836,7 @@ async fn main() {
 
     let bid_tree = warp::any().map(move || orderbook.bid_tree.clone());
     let ask_tree = warp::any().map(move || orderbook.ask_tree.clone());
+
 
     pretty_env_logger::init();
 
@@ -737,7 +852,7 @@ async fn main() {
         .and(bid_tree)
         .and(ask_tree)
         .and(with_auth())
-        .map(|ws: warp::ws::Ws, bid_tree, ask_tree, pubkey: String| {
+        .map(|ws: warp::ws::Ws, bid_tree, ask_tree, pubkey| {
             ws.on_upgrade(move |socket| {
                 handle_websocket_messages(socket, bid_tree, ask_tree, pubkey)
             })

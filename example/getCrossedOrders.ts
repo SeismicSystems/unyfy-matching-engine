@@ -13,7 +13,7 @@ const orderDetails = {
     hash: orderLines[4].split('=')[1].trim(),
 };
 
-const ws = new WebSocket('localhost:8000/ws', {
+const ws = new WebSocket('ws://localhost:8000/ws', {
     headers: { Authorization: `Bearer ${jwt}` }
 });
 
@@ -32,9 +32,10 @@ ws.on('open', function open() {
                 "price": (parseFloat(orderDetails.price || '0') * 10**9).toString(),
                 "volume": (parseInt(orderDetails.volume || '0') * 10**9).toString(),
                 "accessKey": orderDetails.access_key.toString(),
-                "hash": orderDetails.hash.toString()
+                
             }
-        }
+        },
+        "hash": orderDetails.hash.toString()
     };
 
     ws.send(JSON.stringify(getCrossedOrdersRequestJson), (error) => {

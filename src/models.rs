@@ -134,6 +134,7 @@ pub struct RBTree<T: Ord + Debug + Copy> {
     pub root: LimitNodePtr<T>,
     pub count: u32,
     pub map: HashMap<Fq, Fq>, // <hash, price> hashmap
+    pub key_hash_map: HashMap<U256, Vec<Fq>>,
 }
 
 impl<T> RBTree<T>
@@ -145,6 +146,7 @@ where
             root: None,
             count: 0,
             map: HashMap::new(),
+            key_hash_map: HashMap::new(),
         }
     }
 
@@ -168,6 +170,13 @@ where
             self.root = self.insert_fix(updated_tree.1).await;
             self.map
                 .insert(data.raw_order_commitment.private, data.raw_order.s.p);
+            self.key_hash_map
+                .entry(data.pubkey)
+                .or_insert(Vec::new())
+                .push(data.raw_order_commitment.private);
+            println!("{}", self.key_hash_map.len().to_string());
+            let vec_length = self.key_hash_map.get(&data.pubkey).map_or(0, |v| v.len());
+            println!("The length of the vector is {}", vec_length);
         } else {
             let x = self.search(price, data.clone()).await;
             let raw_order_clone = data.raw_order.clone();
@@ -187,6 +196,13 @@ where
             }
             self.map
                 .insert(data.raw_order_commitment.private, data.raw_order.s.p);
+            self.key_hash_map
+                .entry(data.pubkey)
+                .or_insert(Vec::new())
+                .push(data.raw_order_commitment.private);
+            println!("{}", self.key_hash_map.len().to_string());
+            let vec_length = self.key_hash_map.get(&data.pubkey).map_or(0, |v| v.len());
+            println!("The length of the vector is {}", vec_length);
         }
     }
 
@@ -559,8 +575,14 @@ where
         None
     }
 
-    pub async fn delete_hash(&mut self, hash: Fq) {
-        if self.map.contains_key(&hash) {
+    pub async fn get_orders_by_pubkey(&mut self, pubkey: U256) -> Vec<Order> {
+        let mut hashes = Vec::new();
+        if self.key_hash_map.contains_key(&pubkey) {
+            hashes = self.key_hash_map.get(&pubkey).unwrap().clone();
+        }
+
+        let mut orders = Vec::new();
+        for hash in hashes {
             let price = self.map.get(&hash).unwrap();
             let dummy = Node::<T>::new(*price, Data::default())
                 .unwrap()
@@ -572,6 +594,31 @@ where
                 let node_orders = node.as_ref().unwrap().read().await.orders.clone();
                 if node_orders.contains_key(&hash) {
                     let inner_map = node_orders.get(&hash).unwrap();
+                    for (_, order_tuple) in inner_map {
+                        orders.push(order_tuple.0.clone());
+                    }
+                }
+            }
+        }
+
+        orders
+    }
+
+    pub async fn delete_hash(&mut self, hash: Fq) {
+        if self.map.contains_key(&hash) {
+            let price = self.map.get(&hash).unwrap();
+            println!("Price is: {:?}", price);
+            let dummy = Node::<T>::new(*price, Data::default())
+                .unwrap()
+                .write()
+                .await
+                .clone();
+            let node = self.search_node(&self.root, &dummy).await;
+            if node.is_some() {
+                println!("Found!");
+                let node_orders = node.as_ref().unwrap().read().await.orders.clone();
+                if node_orders.contains_key(&hash) {
+                    let inner_map = node_orders.get(&hash).unwrap();
                     let (first_key, first_value) = inner_map.iter().next().unwrap();
                     let data = Data {
                         pubkey: first_value.1,
@@ -580,6 +627,7 @@ where
                     };
                     self.delete(node.as_ref().unwrap().read().await.price, data)
                         .await;
+                    self.print_inorder().await;
                 }
             }
         }
@@ -677,6 +725,11 @@ where
                 self.delete_fix(x.clone(), p.clone(), side).await;
             }
             self.count -= 1;
+            self.map.remove(&data.raw_order_commitment.private);
+            self.key_hash_map
+                .get_mut(&data.pubkey)
+                .unwrap()
+                .retain(|&x| x != data.raw_order_commitment.private);
         } else {
             if let Some(inner_map) = z
                 .as_ref()
@@ -690,6 +743,10 @@ where
             }
             z.as_ref().unwrap().write().await.size -= 1;
             self.map.remove(&data.raw_order_commitment.private);
+            self.key_hash_map
+                .get_mut(&data.pubkey)
+                .unwrap()
+                .retain(|&x| x != data.raw_order_commitment.private);
         }
     }
 
