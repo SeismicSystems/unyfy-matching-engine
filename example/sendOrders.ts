@@ -1,8 +1,10 @@
 // sendOrders.ts
 import WebSocket from 'ws';
+import { ethers } from 'ethers';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 const buildPoseidon = require("circomlibjs").buildPoseidon;
+import { poseidon4 } from 'poseidon-lite';
 
 const jwt = fs.readFileSync('jwt.txt', 'utf8').trim();
 const rawOrders = fs.readFileSync('sendorders.txt', 'utf8').split('--');
@@ -12,9 +14,8 @@ const ws = new WebSocket('ws://localhost:8000/ws', {
 
 let constructedOrders = '';
 
-async function getPoseidonHash(price: String, volume: String, side: String, accessKey: String) {
-    const poseidon = await buildPoseidon();
-    return poseidon([price, volume, side, accessKey]);
+function getPoseidonHash(price: string, volume: string, side: string, accessKey: string) {
+    return poseidon4([price, volume, side, accessKey]);
 }
 
 
@@ -43,7 +44,7 @@ ws.on('open', function open() {
             let volume = parseInt(orderData.volume || '0')*10**9;
             let side =  orderData.side?.toString() || '0';
             let buffer = orderData.accessKey ? Buffer.from(orderData.accessKey, 'hex') : Buffer.alloc(0);
-            getPoseidonHash(price.toString(), volume.toString(), side, bigIntString).then((hash) => {
+            let hash = getPoseidonHash(price.toString(), volume.toString(), side, bigIntString);
                 console.log(hash.toString)
                 let hashString = hash.toString();
                 let decimalArray = hashString.split(",");
@@ -74,14 +75,43 @@ console.log(hexString); // Outputs the hexadecimal string
                     if (error) {
                         console.error('Error sending message:', error);
                     }
-                });
             });
         })
     });
 
-ws.on('message', function message(data) {
-    console.log('Received message:', data.toString());
-});
+    ws.on('message', function message(data) {
+        console.log('Received message:', data.toString());
+        let parsedData;
+        try {
+            parsedData = JSON.parse(data.toString());
+        } catch (error) {
+            return;
+        }
+        // Parse the received data
+        try {
+            const parsedData = JSON.parse(data.toString());
+            const signature = `0x${parsedData.enclaveSignature.signatureValue}`;
+            const address = `0x${parsedData.enclaveSignature.enclavePublicAddress}`;
+
+            // The message that was signed on the client side
+            const originalMessage = parsedData.enclaveSignature.orderCommitment.shielded;
+
+            // Hash the message (Ethereum signed message format)
+            const hashedMessage = ethers.hashMessage(originalMessage);
+
+            // Recover the signer's address
+            const recoveredAddress = ethers.recoverAddress(hashedMessage, signature);
+
+            // Compare the recovered address with the provided address
+            if (recoveredAddress.toLowerCase() === address.toLowerCase()) {
+                console.log("Signature is valid!");
+            } else {
+                console.log("Signature is invalid.");
+            }
+        } catch (error) {
+            console.error("Error processing the message:", error);
+        }
+    });
 
 ws.on('error', function error(err) {
     console.error('WebSocket error:', err);

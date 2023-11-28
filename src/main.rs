@@ -49,8 +49,9 @@ use warp::{
     reject, Filter, Rejection,
 };
 use web3::signing::{keccak256, recover, Key};
-use ethsign::{PublicKey, SecretKey, Signature};
-
+use ethers::core::types::Signature;
+use ethers::signers::{LocalWallet, Signer};
+use std::fs;
 
 const BEARER: &str = "Bearer ";
 
@@ -199,6 +200,17 @@ async fn handle_websocket_messages(
     pubkey: String,
 ) {
     
+    let keys = fs::read_to_string("enclave_data.txt").unwrap();
+    let split: Vec<&str> = keys.split_whitespace().collect();
+    let private_key = split.get(0).ok_or("Private key not found").unwrap();
+    let private_key = format!("0x{}", private_key);
+    let public_address = split.get(1).ok_or("Private key not found").unwrap();
+
+    // Create a wallet from the private key
+    let wallet: LocalWallet = private_key.parse().unwrap();
+
+    
+
     let (mut sender, mut receiver) = websocket.split();
 
     sender
@@ -321,19 +333,13 @@ async fn handle_websocket_messages(
                     let commitment_return =
                         BigUint::from_bytes_le(&commitment.private.to_bytes()).to_str_radix(16);
 
+                    // Your message to sign
+    let message = &commitment_return;
 
-                    /*let signature: Signature = enclave_private_key.sign(&eth_message(hash_str.to_string())).unwrap();
-
-                    let r = signature.r;
-                    let s = signature.s;
-                    let v = signature.v;
-                    let mut combined = Vec::new();
-combined.extend(&r);
-combined.extend(&s);
-combined.extend(&[v]); */
-
-
-// let signature_hex = format!("0x{}", hex::encode(combined));
+    // Hash the message (Ethereum signed message format)
+    let hashed_message = eth_message(message.to_string());
+    // Sign the message
+    let signature = wallet.sign_hash(hashed_message.into()).unwrap().to_string();
                     
                     // Construct the JSON payload
                     let payload = json!({
@@ -347,7 +353,8 @@ combined.extend(&[v]); */
                                 },
                                 "shielded": commitment_return,
                             },
-                            "signatureValue": "yes"
+                            "signatureValue": signature,
+                            "enclavePublicAddress": public_address.to_string(),
                         }
                     });
 

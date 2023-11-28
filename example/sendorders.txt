@@ -1,4 +1,11 @@
 price=100
 volume=1
 side=1
-
+--
+price=101.22
+volume=2
+side=0
+--
+price=103
+volume=3
+side=1

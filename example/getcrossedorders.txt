@@ -1,5 +1,0 @@
-price = 100
-volume = 1
-side = 1
-access_key = 366168770514
-hash = f07bb71fc264d2e2e671c37196100f

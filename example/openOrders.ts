@@ -1,4 +1,3 @@
-declare module 'circomlib';
 
 import WebSocket from 'ws';
 import * as fs from 'fs';
