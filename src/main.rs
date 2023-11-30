@@ -1,38 +1,37 @@
-
+use chrono::prelude::*;
+use ethers::prelude::*;
+use ethers::signers::LocalWallet;
+use ethnum::U256;
 use futures_util::stream::StreamExt;
 use futures_util::SinkExt;
+use halo2curves::bn256::Fr as Fq;
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use num_bigint::BigUint;
+use rand::Rng;
 use serde_derive::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::fs;
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 use tokio::sync::mpsc;
 use tokio::sync::RwLock;
+use unyfy_matching_engine::matching::*;
 use unyfy_matching_engine::models::Orderbook;
 use unyfy_matching_engine::models::RBTree;
-use warp::ws::Message;
-use ethnum::U256;
-use halo2curves::bn256::Fr as Fq;
-use rand::Rng;
-use serde_json::json;
-use ethers::prelude::*;
-use std::fmt::Debug;
-use std::time::SystemTime;
-use unyfy_matching_engine::matching::*;
 use unyfy_matching_engine::models::*;
 use unyfy_matching_engine::raw_order::*;
+use warp::ws::Message;
 use warp::ws::WebSocket;
 use warp::Reply;
-use chrono::prelude::*;
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
-use std::time::UNIX_EPOCH;
 use warp::{
     filters::header::headers_cloned,
     http::header::{HeaderMap, HeaderValue, AUTHORIZATION},
     reject, Filter, Rejection,
 };
 use web3::signing::{keccak256, recover};
-use ethers::signers::LocalWallet;
-use std::fs;
 
 const BEARER: &str = "Bearer ";
 
@@ -110,7 +109,6 @@ async fn handle_websocket_messages(
     ask_tree: Arc<RwLock<RBTree<Fq>>>,
     pubkey: String,
 ) {
-    
     let keys = fs::read_to_string("enclave_data.txt").unwrap();
     let split: Vec<&str> = keys.split_whitespace().collect();
     let private_key = split.get(0).ok_or("Private key not found").unwrap();
@@ -119,8 +117,6 @@ async fn handle_websocket_messages(
 
     // Create a wallet from the private key
     let wallet: LocalWallet = private_key.parse().unwrap();
-
-    
 
     let (mut sender, mut receiver) = websocket.split();
 
@@ -225,13 +221,13 @@ async fn handle_websocket_messages(
                         BigUint::from_bytes_le(&commitment.private.to_bytes()).to_str_radix(16);
 
                     // Your message to sign
-    let message = &commitment_return;
+                    let message = &commitment_return;
 
-    // Hash the message (Ethereum signed message format)
-    let hashed_message = eth_message(message.to_string());
-    // Sign the message
-    let signature = wallet.sign_hash(hashed_message.into()).unwrap().to_string();
-                    
+                    // Hash the message (Ethereum signed message format)
+                    let hashed_message = eth_message(message.to_string());
+                    // Sign the message
+                    let signature = wallet.sign_hash(hashed_message.into()).unwrap().to_string();
+
                     // Construct the JSON payload
                     let payload = json!({
                         "action": "sendorder",
@@ -312,7 +308,6 @@ async fn handle_websocket_messages(
                             alpha: Fq::from_bytes(&access_key_bytes).unwrap(),
                         },
                     };
-
 
                     let commitment = Commitment {
                         public: order.t.clone(),
@@ -483,41 +478,47 @@ async fn handle_websocket_messages(
 
                     let message = Message::text(payload.to_string());
                     sender.send(message).await.unwrap();
-                }
-                else if json_msg["action"]=="fillorders"{
+                } else if json_msg["action"] == "fillorders" {
                     let side = json_msg["data"]["side"].as_str().unwrap();
                     let side_num = side.to_string().parse::<u64>().unwrap();
                     let hash_own_str = json_msg["data"]["hash_own"].as_str().unwrap();
-                    let hash_own_bytes = BigUint::parse_bytes(hash_own_str.as_bytes(), 16).unwrap().to_bytes_le();
+                    let hash_own_bytes = BigUint::parse_bytes(hash_own_str.as_bytes(), 16)
+                        .unwrap()
+                        .to_bytes_le();
                     let mut hash_own_array = [0u8; 32];
                     for (i, byte) in hash_own_bytes.iter().enumerate() {
                         hash_own_array[i] = *byte;
                     }
                     let hash_own = Fq::from_bytes(&hash_own_array).unwrap();
 
-                    let hash_matched = json_msg["data"]["hash_matched"].as_array().unwrap().iter().map(|x| {
-                        let hash_str = x.as_str().unwrap();
-                        let hash_bytes = BigUint::parse_bytes(hash_str.as_bytes(), 16).unwrap().to_bytes_le();
-                        let mut hash_array = [0u8; 32];
-                        for (i, byte) in hash_bytes.iter().enumerate() {
-                            hash_array[i] = *byte;
-                        }
-                        Fq::from_bytes(&hash_array).unwrap()
-                    }).collect::<Vec<Fq>>();
+                    let hash_matched = json_msg["data"]["hash_matched"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|x| {
+                            let hash_str = x.as_str().unwrap();
+                            let hash_bytes = BigUint::parse_bytes(hash_str.as_bytes(), 16)
+                                .unwrap()
+                                .to_bytes_le();
+                            let mut hash_array = [0u8; 32];
+                            for (i, byte) in hash_bytes.iter().enumerate() {
+                                hash_array[i] = *byte;
+                            }
+                            Fq::from_bytes(&hash_array).unwrap()
+                        })
+                        .collect::<Vec<Fq>>();
 
-                    if side_num==0{
+                    if side_num == 0 {
                         bid_tree.write().await.delete_hash(hash_own).await;
-                        for hash in hash_matched{
+                        for hash in hash_matched {
                             ask_tree.write().await.delete_hash(hash).await;
                         }
-                    }
-                    else{
+                    } else {
                         ask_tree.write().await.delete_hash(hash_own).await;
-                        for hash in hash_matched{
+                        for hash in hash_matched {
                             bid_tree.write().await.delete_hash(hash).await;
                         }
                     }
-
                 }
             }
         }
@@ -554,10 +555,7 @@ pub async fn handle_submit_response(
             return Ok(warp::reply::json(&"Challenge timed out!"));
         }
         return match verify_signature(&response) {
-            Ok(_) => {
-              
-                Ok(warp::reply::json(&create_jwt(&response.pub_key).unwrap()))
-            }
+            Ok(_) => Ok(warp::reply::json(&create_jwt(&response.pub_key).unwrap())),
             Err(_) => Ok(warp::reply::json(&"Invalid signature")),
         };
     } else {
@@ -575,7 +573,6 @@ fn create_jwt(pub_key: &str) -> Result<String, MyError> {
         sub: pub_key.to_owned(),
         exp: expiration as usize,
     };
-
 
     let header = Header::new(Algorithm::HS512);
     encode(&header, &claims, &EncodingKey::from_secret(JWT_SECRET))
@@ -668,7 +665,6 @@ fn current_timestamp() -> u64 {
 
 #[tokio::main]
 async fn main() {
-
     let state = Arc::new(AppState {
         challenges: Mutex::new(HashMap::new()),
     });

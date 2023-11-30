@@ -11,7 +11,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-
 pub async fn match_bid<T>(
     order: Order,
     pubkey: U256,

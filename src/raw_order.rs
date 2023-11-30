@@ -1,7 +1,5 @@
-
 use halo2curves::bn256::Fr as Fq;
 use serde::{Deserialize, Serialize};
-
 
 // F_q is the scalar field of curve bn128
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
