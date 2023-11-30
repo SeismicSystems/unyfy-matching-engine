@@ -1,13 +1,14 @@
 use crate::raw_order::{Commitment, Order};
 use std::collections::HashMap;
+use ethnum::U256;
 pub struct StagingOrder {
-    pub pubkey: u32,
+    pub pubkey: U256,
     pub order: Order,
     pub timestamp: u32,
 }
 
 pub struct StagingQueue {
-    stagingorders: HashMap<u32, Vec<HashMap<Commitment, StagingOrder>>>,
+    stagingorders: HashMap<U256, Vec<HashMap<Commitment, StagingOrder>>>,
 }
 
 impl StagingQueue {
@@ -26,7 +27,7 @@ impl StagingQueue {
         }
     }
 
-    pub fn remove_order(&mut self, pubkey: u32, commitment: Commitment) {
+    pub fn remove_order(&mut self, pubkey: U256, commitment: Commitment) {
         if let Some(orders) = self.stagingorders.get_mut(&pubkey) {
             orders.retain(|x| !x.contains_key(&commitment));
         }
