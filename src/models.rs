@@ -1,10 +1,6 @@
 #![allow(dead_code, unused_variables)]
-
 use crate::raw_order::*;
-use ethers::abi::Hash;
-// use ark_bn254::Fr as Fq;
 use halo2curves::bn256::Fr as Fq;
-
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::fmt;
@@ -754,7 +750,6 @@ where
         // x color is true if black and false if red
         let mut x_color = if x.is_some() {
             x.as_ref().unwrap().read().await.color == NodeColor::Black
-            // x.as_ref().unwrap().borrow().clone().color == NodeColor::Black
         } else {
             // Node is none so it is black
             true
@@ -767,49 +762,37 @@ where
                 Direction::Right => {
                     // sibling on the right side of p
                     // cur_p exists or else we wouldnt be in this while loop
-                    // let mut s = cur_p.as_ref().unwrap().borrow().right.clone();
                     let mut s = cur_p.as_ref().unwrap().read().await.right.clone();
                     if s.is_some() {
-                        //  if s.as_ref().unwrap().borrow().clone().color == NodeColor::Red {
                         if s.as_ref().unwrap().read().await.color == NodeColor::Red {
                             // DB's sibling is red
                             // swap color of p with s
                             // rotate parent node left
-                            // s.as_ref().unwrap().borrow_mut().color = NodeColor::Black;
                             s.as_ref().unwrap().write().await.color = NodeColor::Black;
-                            //cur_p.as_ref().unwrap().borrow_mut().color = NodeColor::Red;
                             cur_p.as_ref().unwrap().write().await.color = NodeColor::Red;
                             self.rotate_left(cur_p.as_ref().unwrap().clone()).await;
-                            // s = cur_p.as_ref().unwrap().borrow().right.clone();
                             s = cur_p.as_ref().unwrap().read().await.right.clone();
                         }
-                        // let s_left = s.as_ref().unwrap().borrow().clone().left.clone();
                         let s_left = s.as_ref().unwrap().read().await.clone().left.clone();
-                        // let s_right = s.as_ref().unwrap().borrow().clone().right.clone();
                         let s_right = s.as_ref().unwrap().read().await.clone().right.clone();
                         let s_left_color = if s_left.is_some() {
-                            //  s_left.as_ref().unwrap().borrow().clone().color == NodeColor::Black
                             s_left.as_ref().unwrap().read().await.clone().color == NodeColor::Black
                         } else {
                             true
                         };
 
                         let s_right_color = if s_right.is_some() {
-                            // s_right.as_ref().unwrap().borrow().clone().color == NodeColor::Black
                             s_right.as_ref().unwrap().read().await.clone().color == NodeColor::Black
                         } else {
                             true
                         };
 
                         if s_left_color && s_right_color {
-                            //   s.as_ref().unwrap().borrow_mut().color = NodeColor::Red;
                             s.as_ref().unwrap().write().await.color = NodeColor::Red;
                             cur_x = cur_p.clone();
-                            // let g = cur_p.as_ref().unwrap().borrow().clone().parent.clone();
                             let g = cur_p.as_ref().unwrap().read().await.clone().parent.clone();
                             cur_p = g.clone();
                             x_color = if cur_x.is_some() {
-                                // cur_x.as_ref().unwrap().borrow().clone().color == NodeColor::Black
                                 cur_x.as_ref().unwrap().read().await.clone().color
                                     == NodeColor::Black
                             } else {
@@ -1145,11 +1128,4 @@ where
             .field("count", &self.count)
             .finish()
     }
-}
-
-#[test]
-
-pub fn test_1() {
-    let x = RBTree::<Fq>::new();
-    assert_eq!(x.count, 0);
 }

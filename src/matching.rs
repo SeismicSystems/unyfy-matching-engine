@@ -8,11 +8,9 @@ use ethnum::U256;
 use halo2curves::bn256::Fr as Fq;
 use halo2curves::ff::Field;
 use std::fmt::Debug;
-use std::fmt::Display;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-// TODO -- insert the order
 
 pub async fn match_bid<T>(
     order: Order,

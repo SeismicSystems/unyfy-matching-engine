@@ -1,12 +1,8 @@
-use ark_ff::BigInt;
+
 use futures_util::stream::StreamExt;
-use futures_util::TryFutureExt;
-use futures_util::{FutureExt, SinkExt};
-use std::fs::read_to_string;
-use halo2curves::ff::Field;
-use num_bigint::{BigUint, ToBigUint};
+use futures_util::SinkExt;
+use num_bigint::BigUint;
 use serde_derive::{Deserialize, Serialize};
-use sha2::digest::typenum::uint;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -14,43 +10,28 @@ use tokio::sync::RwLock;
 use unyfy_matching_engine::models::Orderbook;
 use unyfy_matching_engine::models::RBTree;
 use warp::ws::Message;
-use warp::*;
-// use ark_bn254::Fr as Fq;
 use ethnum::U256;
 use halo2curves::bn256::Fr as Fq;
 use rand::Rng;
 use serde_json::json;
-use sha2::{Digest, Sha256};
-// use std::error::Error;
 use ethers::prelude::*;
 use std::fmt::Debug;
-use std::fs::File;
-use std::io::BufRead;
-use std::io::BufReader;
-use std::path::Path;
 use std::time::SystemTime;
 use unyfy_matching_engine::matching::*;
 use unyfy_matching_engine::models::*;
 use unyfy_matching_engine::raw_order::*;
 use warp::ws::WebSocket;
 use warp::Reply;
-// use ethers::utils::keccak256;
 use chrono::prelude::*;
-use dotenv::dotenv;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
-use std::env;
-use std::fmt;
-use std::io::Error;
-use std::str::FromStr;
 use std::time::UNIX_EPOCH;
 use warp::{
     filters::header::headers_cloned,
     http::header::{HeaderMap, HeaderValue, AUTHORIZATION},
     reject, Filter, Rejection,
 };
-use web3::signing::{keccak256, recover, Key};
-use ethers::core::types::Signature;
-use ethers::signers::{LocalWallet, Signer};
+use web3::signing::{keccak256, recover};
+use ethers::signers::LocalWallet;
 use std::fs;
 
 const BEARER: &str = "Bearer ";
@@ -115,82 +96,12 @@ pub enum MyError {
 
 impl warp::reject::Reject for MyError {}
 
-type ResultUtil<T> = std::result::Result<T, Rejection>;
-type Clients = Arc<Mutex<HashMap<String, Client>>>;
-// type Result<T> = std::result::Result<T, error::Error>;
 type WebResult<T> = std::result::Result<T, Rejection>;
 
 async fn clear_orderbook<T: Ord + Debug + Copy>(tree: &Arc<RwLock<RBTree<T>>>) {
     let mut tree = tree.write().await;
     tree.root = None;
     tree.count = 0;
-}
-
-async fn read_and_insert(
-    file_path: &Path,
-    bid_tree: Arc<RwLock<RBTree<Fq>>>,
-    ask_tree: Arc<RwLock<RBTree<Fq>>>,
-) {
-    let file = File::open(file_path).expect("cannot open file");
-    let reader = BufReader::new(file);
-
-    for line in reader.lines() {
-        let line = line.expect("could not read line");
-        let order_data: Vec<&str> = line.split(',').collect();
-
-        if order_data.len() != 6 {
-            continue; // or handle the error
-        }
-
-        let pubkey = U256::from_str_hex(&format!("0x{}", order_data[0])).expect("invalid pubkey");
-        let phi_value: u64 = order_data[1].parse().expect("invalid phi value");
-        let chi = order_data[2].to_string();
-        let d = "0x1".to_string();
-        let p_value: u128 = order_data[4].parse().expect("invalid price");
-        let p_bytes = p_value.to_le_bytes();
-        let mut p_bytes_32: [u8; 32] = [0; 32];
-        p_bytes_32[..16].copy_from_slice(&p_value.to_le_bytes());
-        let v_value: u128 = order_data[5].parse().expect("invalid volume");
-        let v_bytes = v_value.to_le_bytes();
-        let mut v_bytes_32: [u8; 32] = [0; 32];
-        v_bytes_32[..16].copy_from_slice(&v_value.to_le_bytes());
-        let alpha_value = rand::thread_rng().gen::<u128>();
-        // Assuming conversion function u128_to_fq is implemented for converting u128 to Fq
-        let p = Fq::from_bytes(&p_bytes_32).unwrap();
-        let v = Fq::from_bytes(&v_bytes_32).unwrap();
-        let alpha = Fq::random(&mut rand::thread_rng());
-        let phi = Fq::from(phi_value);
-        let raw_order_commitment = hash_three_values(p, v, alpha).await;
-        let order_commitment = Fq::from(raw_order_commitment);
-
-        let order = Order {
-            t: TransparentStructure { phi, chi, d },
-            s: ShieldedStructure { p, v, alpha },
-        };
-
-        let commitment = Commitment {
-            public: order.t.clone(),
-            private: order_commitment,
-        };
-
-        let data = Data {
-            pubkey,
-            raw_order: order,
-            raw_order_commitment: commitment,
-        };
-
-        match phi_value {
-            0 => {
-                let mut bid_tree_write = bid_tree.write().await;
-                bid_tree_write.insert(p, data).await;
-            }
-            1 => {
-                let mut ask_tree_write = ask_tree.write().await;
-                ask_tree_write.insert(p, data).await;
-            }
-            _ => eprintln!("Invalid phi value: {:?}", phi),
-        }
-    }
 }
 
 async fn handle_websocket_messages(
@@ -287,8 +198,6 @@ async fn handle_websocket_messages(
                         },
                     };
 
-                    //   let hash = hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
-
                     let hash_value = Fq::from_bytes(&hash_bytes).unwrap();
 
                     let commitment = Commitment {
@@ -302,8 +211,6 @@ async fn handle_websocket_messages(
                         raw_order_commitment: commitment.clone(),
                     };
 
-                    println!("We here!");
-
                     if side_num == 0 {
                         bid_tree.write().await.insert(order.s.p, data).await;
                         bid_tree.read().await.print_inorder().await;
@@ -311,22 +218,6 @@ async fn handle_websocket_messages(
                         ask_tree.write().await.insert(order.s.p, data).await;
                         ask_tree.read().await.print_inorder().await;
                     }
-
-                    // Add to the appropriate tree
-                    /*if side == 0 {
-                        let mut bid_tree_write = bid_tree.write().await;
-                        bid_tree_write.insert(order.s.p, data).await;
-                        bid_tree.read().await.print_inorder().await;
-                        // should actually be inserted into the staging queue -- TODO
-                    } else {
-                        let mut ask_tree_write = ask_tree.write().await;
-                        ask_tree_write.insert(order.s.p, data).await;
-                        ask_tree.read().await.print_inorder().await;
-                        // should actually be inserted into the staging queue -- TODO
-                    }
-
-
-                    println!("Ok!!"); */
 
                     let side_return =
                         BigUint::from_bytes_le(&order.t.phi.to_bytes()).to_str_radix(10);
@@ -422,7 +313,6 @@ async fn handle_websocket_messages(
                         },
                     };
 
-                    // let hash = hash_three_values(order.s.p, order.s.v, order.s.alpha).await;
 
                     let commitment = Commitment {
                         public: order.t.clone(),
@@ -435,9 +325,9 @@ async fn handle_websocket_messages(
                         raw_order_commitment: commitment.clone(),
                     };
 
-                    let mut found: bool;
+                    let found: bool;
 
-                    let mut matches: Option<Vec<Order>>;
+                    let matches: Option<Vec<Order>>;
 
                     if side_num == 0 {
                         match bid_tree.read().await.search_exact_order(data).await {
@@ -548,7 +438,6 @@ async fn handle_websocket_messages(
                     println!("ask orders: {:?}", ask_orders);
                     let mut json_array = serde_json::Value::Array(Vec::new());
                     for order in bid_orders {
-                        // let hash = Fq::from_bytes(&hash_bytes).unwrap();
                         let order_json = json!({
                             "raw_order": {
                                 "t": {
@@ -567,7 +456,6 @@ async fn handle_websocket_messages(
                     }
 
                     for order in ask_orders {
-                        // let hash = Fq::from_bytes(&hash_bytes).unwrap();
                         let order_json = json!({
                             "raw_order": {
                                 "t": {
@@ -636,19 +524,6 @@ async fn handle_websocket_messages(
     }
 }
 
-async fn hash_three_values(a: Fq, b: Fq, c: Fq) -> Fq {
-    let mut hasher = Sha256::new();
-    hasher.update(a.to_bytes());
-    hasher.update(b.to_bytes());
-    hasher.update(c.to_bytes());
-    let hash: [u8; 32] = hasher.finalize().into();
-    // println!("hash is: {:?} ", hash);
-    // let hash_array: [u8; 32] = hash.into();
-    let mut bytes = [0u8; 32];
-    bytes[0..30].copy_from_slice(&hash[0..30]);
-    Fq::from_bytes(&bytes).unwrap()
-}
-
 pub async fn handle_request_challenge(state: Arc<AppState>) -> WebResult<impl Reply> {
     let challenge_id = generate_challenge_id(); // Implement this function to generate unique challenge IDs
     let challenge_timestamp = SystemTime::now()
@@ -680,7 +555,7 @@ pub async fn handle_submit_response(
         }
         return match verify_signature(&response) {
             Ok(_) => {
-                //let jwt = issue_jwt();
+              
                 Ok(warp::reply::json(&create_jwt(&response.pub_key).unwrap()))
             }
             Err(_) => Ok(warp::reply::json(&"Invalid signature")),
@@ -701,7 +576,6 @@ fn create_jwt(pub_key: &str) -> Result<String, MyError> {
         exp: expiration as usize,
     };
 
-    // let a: &[u8] = b"hello";
 
     let header = Header::new(Algorithm::HS512);
     encode(&header, &claims, &EncodingKey::from_secret(JWT_SECRET))
@@ -743,18 +617,8 @@ fn jwt_from_header(headers: &HeaderMap<HeaderValue>) -> Result<String, MyError> 
 }
 
 fn verify_signature(client_response: &ClientResponse) -> Result<(), &'static str> {
-    // Decode the hex-encoded signature, message, and public key
     let signature_bytes = hex::decode(strip_0x_prefix(&client_response.signature)).unwrap();
-    let message_bytes = hex::decode(strip_0x_prefix(&client_response.challenge_id)).unwrap();
     let pub_key_bytes = hex::decode(strip_0x_prefix(&client_response.pub_key)).unwrap();
-
-    // println!("pubkey: {:?}", &client_response.pub_key);
-    // println!("signature: {:?}", &client_response.signature);
-    // println!("challenge_id: {:?}", &client_response.challenge_id);
-
-    // println!("pubkey_bytes: {:?}", pub_key_bytes);
-    // println!("signature_bytes: {:?}", signature_bytes);
-    // println!("message_bytes: {:?}", message_bytes);
 
     let message_bytes = eth_message(client_response.challenge_id.clone());
 
@@ -804,8 +668,7 @@ fn current_timestamp() -> u64 {
 
 #[tokio::main]
 async fn main() {
-    // Read public and private keys from .env file
-    // let clients = Clients::new(Mutex::new(HashMap::new()));
+
     let state = Arc::new(AppState {
         challenges: Mutex::new(HashMap::new()),
     });
@@ -829,30 +692,10 @@ async fn main() {
         ask_tree: Arc::new(RwLock::new(RBTree::new())),
     };
 
-    /*let file_path = Path::new("orders.txt");
-    read_and_insert(
-        &file_path,
-        orderbook.bid_tree.clone(),
-        orderbook.ask_tree.clone(),
-    )
-    .await; */
-
-    // let safe_orderbook = SafeOrderbook::new(RwLock::new(orderbook));
-
-    // let safe_orderbook = warp::any().map(move || safe_orderbook.clone());
-
     let bid_tree = warp::any().map(move || orderbook.bid_tree.clone());
     let ask_tree = warp::any().map(move || orderbook.ask_tree.clone());
 
-
     pretty_env_logger::init();
-
-    /* let ws_with_auth = warp::path("ws_auth")
-    .and(warp::ws())
-    .and(with_auth())
-    .map(|ws: warp::ws::Ws, pubkey: String| {
-        ws.on_upgrade(move |socket| handle_success(socket, pubkey))
-    }); */
 
     let ws_route = warp::path("ws")
         .and(warp::ws())
@@ -864,24 +707,6 @@ async fn main() {
                 handle_websocket_messages(socket, bid_tree, ask_tree, pubkey)
             })
         });
-    // Then in your main function:
-
-    /*let routes = warp::path("ws")
-    .and(warp::ws())
-    .and(warp::header::headers_cloned())
-    .map(|ws: warp::ws::Ws, headers: warp::http::HeaderMap| {
-        println!("{:?}", headers);
-        ws.on_upgrade(|websocket| {
-            // Handle the websocket connection here
-            // For example, you can just echo back all received messages:
-            let (tx, rx) = websocket.split();
-            rx.forward(tx).map(|result| {
-                if let Err(e) = result {
-                    eprintln!("websocket error: {:?}", e);
-                }
-            })
-        })
-    }); */
 
     let routes = request_challenge.or(submit_response).or(ws_route);
 

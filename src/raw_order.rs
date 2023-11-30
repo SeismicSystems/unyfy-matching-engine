@@ -1,10 +1,7 @@
-// use ark_bn254::Fr as Fq;
-use ark_serialize::*;
-use halo2curves::bn256::Fr as Fq;
-use serde::{Deserialize, Serialize, Serializer};
-use sha2::{Digest, Sha256};
 
-// use ark_ff::ToBytes;
+use halo2curves::bn256::Fr as Fq;
+use serde::{Deserialize, Serialize};
+
 
 // F_q is the scalar field of curve bn128
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
