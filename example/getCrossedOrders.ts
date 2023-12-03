@@ -4,7 +4,7 @@ import * as fs from 'fs';
 
 const jwt = fs.readFileSync('jwt.txt', 'utf8').trim();
 const orderLines = fs.readFileSync('getcrossedorders.txt', 'utf8').trim().split('\n');
-
+console.log(orderLines);
 const orderDetails = {
     price: orderLines[0].split('=')[1].trim(),
     volume: orderLines[1].split('=')[1].trim(),

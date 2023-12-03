@@ -51,7 +51,7 @@ ws.on('open', function open() {
                 let hexArray = decimalArray.map((num: string) => parseInt(num).toString(16).padStart(2, '0'));
 let hexString = hexArray.join("");
 console.log(hexString); // Outputs the hexadecimal string
-                constructedOrders += `price = ${orderData.price}\nvolume = ${orderData.volume}\nside = ${orderData.side}\naccess_key = ${orderData.accessKey}\nhash = ${hash}\n--\n`;
+                constructedOrders += `price = ${orderData.price}\nvolume = ${orderData.volume}\nside = ${orderData.side}\naccess_key = ${orderData.accessKey}\nhash = ${hexString}\n--\n`;
                 const sendOrderRequestJson = {
                     "action": "sendorder",
                     "data": {
@@ -77,6 +77,8 @@ console.log(hexString); // Outputs the hexadecimal string
                     }
             });
         })
+        fs.writeFileSync('constructedorders.txt', constructedOrders.trim());
+    console.log('Constructed orders written to constructedorders.txt');
     });
 
     ws.on('message', function message(data) {

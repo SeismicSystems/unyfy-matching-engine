@@ -261,7 +261,7 @@ async fn handle_websocket_messages(
                     // Parse the strings into BigUint, assuming decimal format
                     let price = BigUint::parse_bytes(price_str.as_bytes(), 10).unwrap();
                     let volume = BigUint::parse_bytes(volume_str.as_bytes(), 10).unwrap();
-                    let access_key = BigUint::parse_bytes(access_key_str.as_bytes(), 10).unwrap();
+                    let access_key = BigUint::parse_bytes(access_key_str.as_bytes(), 16).unwrap();
                     let hash = BigUint::parse_bytes(hash_str.as_bytes(), 16).unwrap();
 
                     let price_bytes_vec = price.to_bytes_le();
