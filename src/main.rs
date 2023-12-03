@@ -375,16 +375,16 @@ async fn handle_websocket_messages(
                                         "s": {
                                             "p": BigUint::from_bytes_le(&order.s.p.to_bytes()).to_str_radix(10),
                                             "v": BigUint::from_bytes_le(&order.s.v.to_bytes()).to_str_radix(10),
-                                            "alpha": BigUint::from_bytes_le(&order.s.alpha.to_bytes()).to_str_radix(10),
+                                            "alpha": BigUint::from_bytes_le(&order.s.alpha.to_bytes()).to_str_radix(16),
                                         },
                                     },
                                     "raw_order_commitment": {
                                         "public": {
-                                            "phi": BigUint::from_bytes_le(&order.t.phi.to_bytes()).to_str_radix(10),
-                                            "chi": order.t.chi,
+                                            "phi": BigUint::from_bytes_le(&order.t.phi.to_bytes()).to_str_radix(16),
+                                         "chi": order.t.chi,
                                             "d": order.t.d,
                                         },
-                                        "private": BigUint::from_bytes_le(&hash.to_bytes()).to_str_radix(10),
+                                        "private": BigUint::from_bytes_le(&hash.to_bytes()).to_str_radix(16),
                                     },
                                 });
                                 json_array.as_array_mut().unwrap().push(order_json);
@@ -402,7 +402,7 @@ async fn handle_websocket_messages(
                                 "token": order.t.chi,
                                 "denomination": order.t.d
                             },
-                            "shielded": BigUint::from_bytes_le(&commitment.private.to_bytes()).to_str_radix(10),
+                            "shielded": BigUint::from_bytes_le(&commitment.private.to_bytes()).to_str_radix(16),
                         },
                         "data": {
                             "orders": json_array,
@@ -443,7 +443,7 @@ async fn handle_websocket_messages(
                                 "s": {
                                     "p": BigUint::from_bytes_le(&order.s.p.to_bytes()).to_str_radix(10),
                                     "v": BigUint::from_bytes_le(&order.s.v.to_bytes()).to_str_radix(10),
-                                    "alpha": BigUint::from_bytes_le(&order.s.alpha.to_bytes()).to_str_radix(10),
+                                    "alpha": BigUint::from_bytes_le(&order.s.alpha.to_bytes()).to_str_radix(16),
                                 },
                             },
                         });
@@ -461,7 +461,7 @@ async fn handle_websocket_messages(
                                 "s": {
                                     "p": BigUint::from_bytes_le(&order.s.p.to_bytes()).to_str_radix(10),
                                     "v": BigUint::from_bytes_le(&order.s.v.to_bytes()).to_str_radix(10),
-                                    "alpha": BigUint::from_bytes_le(&order.s.alpha.to_bytes()).to_str_radix(10),
+                                    "alpha": BigUint::from_bytes_le(&order.s.alpha.to_bytes()).to_str_radix(16),
                                 },
                             },
                         });
