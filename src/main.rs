@@ -208,6 +208,10 @@ async fn handle_websocket_messages(
                     };
 
                     if side_num == 0 {
+                        // bid_staging_queue.write()....
+                        // listen for events
+                        // if (event_is_listened) { bid_staging_queue.pop()}
+                        // ^ this should be a separate endpoint call
                         bid_tree.write().await.insert(order.s.p, data).await;
                         bid_tree.read().await.print_inorder().await;
                     } else {
@@ -363,28 +367,28 @@ async fn handle_websocket_messages(
                     let mut json_array = serde_json::Value::Array(Vec::new());
                     match matches {
                         Some(matches) => {
-                            for order in matches {
+                            for matched in matches {
                                 let hash = Fq::from_bytes(&hash_bytes).unwrap();
                                 let order_json = json!({
                                     "raw_order": {
                                         "t": {
-                                            "phi": BigUint::from_bytes_le(&order.t.phi.to_bytes()).to_str_radix(10),
-                                            "chi": order.t.chi,
-                                            "d": order.t.d,
+                                            "phi": BigUint::from_bytes_le(&matched.t.phi.to_bytes()).to_str_radix(10),
+                                            "chi": matched.t.chi,
+                                            "d": matched.t.d,
                                         },
                                         "s": {
-                                            "p": BigUint::from_bytes_le(&order.s.p.to_bytes()).to_str_radix(10),
-                                            "v": BigUint::from_bytes_le(&order.s.v.to_bytes()).to_str_radix(10),
-                                            "alpha": BigUint::from_bytes_le(&order.s.alpha.to_bytes()).to_str_radix(16),
+                                            "p": BigUint::from_bytes_le(&matched.s.p.to_bytes()).to_str_radix(10),
+                                            "v": BigUint::from_bytes_le(&matched.s.v.to_bytes()).to_str_radix(10),
+                                            "alpha": BigUint::from_bytes_le(&matched.s.alpha.to_bytes()).to_str_radix(16),
                                         },
                                     },
                                     "raw_order_commitment": {
                                         "public": {
-                                            "phi": BigUint::from_bytes_le(&order.t.phi.to_bytes()).to_str_radix(16),
-                                         "chi": order.t.chi,
-                                            "d": order.t.d,
+                                            "phi": BigUint::from_bytes_le(&matched.t.phi.to_bytes()).to_str_radix(16),
+                                         "chi": matched.t.chi,
+                                            "d": matched.t.d,
                                         },
-                                        "private": BigUint::from_bytes_le(&hash.to_bytes()).to_str_radix(16),
+                                     //   "private": BigUint::from_bytes_le(&hash.to_bytes()).to_str_radix(16),
                                     },
                                 });
                                 json_array.as_array_mut().unwrap().push(order_json);

@@ -22,6 +22,7 @@ where
     let three = Fq::from(3);
     let volume = order.s.v * order.s.p;
     let mut target_volume = three * volume;
+    println!("target volume is: {:?}", target_volume);
     let opposite_side = ask_tree.read().await;
 
     let ask_tree: Vec<Node<T>> = inorder_traverse(&opposite_side).await;
@@ -29,11 +30,13 @@ where
     let mut matched_orders: Vec<Order> = Vec::new();
 
     for node in ask_tree.iter() {
-        if node.price <= order.s.p && target_volume > Fq::from(0) {
+        while node.price <= order.s.p && target_volume > Fq::from(0) {
+            println!("node price is: {:?}", node.price);
             if node.value_sum <= target_volume {
                 for (_, order_map) in &node.orders {
                     for (_, order_tuple) in order_map {
                         if order_tuple.1 != pubkey {
+                            println!("matched order is: {:?}", order_tuple.0);
                             matched_orders.push(order_tuple.0.clone());
                         }
                     }
@@ -44,9 +47,11 @@ where
                     for (_, order_tuple) in order_map {
                         if order_tuple.1 != pubkey {
                             if (order_tuple.0.s.p * order_tuple.0.s.v) <= target_volume {
+                                println!("matched order is: {:?}", order_tuple.0);
                                 matched_orders.push(order_tuple.0.clone());
-                                target_volume = target_volume - (order.s.v * order.s.p);
+                                target_volume = target_volume - (order_tuple.0.s.v * order_tuple.0.s.p);
                             } else {
+                                println!("matched order is: {:?}", order_tuple.0);
                                 let order_clone_volume = (target_volume
                                     * order_tuple.0.s.p.invert().unwrap())
                                     + Fq::from(1000000000);
@@ -66,6 +71,7 @@ where
                 }
             }
         }
+        println!("Target volume is: {:?}", target_volume);
     }
 
     if target_volume == Fq::from(0) {
@@ -90,14 +96,19 @@ where
 
     let bid_tree: Vec<Node<T>> = inorder_traverse(&opposite_side).await;
 
+    // println!("bid tree is: {:?}", bid_tree);
+
     let mut matched_orders: Vec<Order> = Vec::new();
 
     for node in bid_tree.iter().rev() {
+        println!("node price is: {:?}", node.price);
         if node.price >= order.s.p && target_volume > Fq::from(0) {
+            println!("node price is: {:?}", node.price);
             if node.value_sum <= target_volume {
                 for (_, order_map) in &node.orders {
                     for (_, order_tuple) in order_map {
                         if order_tuple.1 != pubkey {
+                            println!("matched order is: {:?}", order_tuple.0);
                             matched_orders.push(order_tuple.0.clone());
                         }
                     }
@@ -108,18 +119,20 @@ where
                     for (_, order_tuple) in order_map {
                         if order_tuple.1 != pubkey {
                             if (order_tuple.0.s.p * order_tuple.0.s.v) <= target_volume {
+                                println!("matched order is: {:?}", order_tuple.0);
                                 matched_orders.push(order_tuple.0.clone());
-                                target_volume = target_volume - (order.s.v * order.s.p);
+                                target_volume = target_volume - (order_tuple.0.s.v * order_tuple.0.s.p);
                             } else {
+                                println!("matched order is: {:?}", order_tuple.0);
                                 let order_clone_volume = (target_volume
                                     * order_tuple.0.s.p.invert().unwrap())
                                     + Fq::from(1000000000);
                                 let order_clone = Order {
                                     t: order_tuple.0.t.clone(),
                                     s: ShieldedStructure {
-                                        p: order.s.p,
+                                        p: order_tuple.0.s.p,
                                         v: order_clone_volume,
-                                        alpha: order.s.alpha,
+                                        alpha: order_tuple.0.s.alpha,
                                     },
                                 };
                                 matched_orders.push(order_clone);
