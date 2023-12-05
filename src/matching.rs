@@ -20,9 +20,9 @@ where
     T: Ord + Clone + Debug + Copy,
 {
     let three = Fq::from(3);
-    let volume = order.s.v * order.s.p;
-    let mut target_volume = three * volume;
-    println!("target volume is: {:?}", target_volume);
+    let total_volume = order.s.v * order.s.p;
+    let mut volume_cutoff = three * total_volume;
+    println!("target volume is: {:?}", volume_cutoff);
     let opposite_side = ask_tree.read().await;
 
     let ask_tree: Vec<Node<T>> = inorder_traverse(&opposite_side).await;
@@ -30,9 +30,9 @@ where
     let mut matched_orders: Vec<Order> = Vec::new();
 
     for node in ask_tree.iter() {
-        while node.price <= order.s.p && target_volume > Fq::from(0) {
+        while node.price <= order.s.p && volume_cutoff > Fq::from(0) {
             println!("node price is: {:?}", node.price);
-            if node.value_sum <= target_volume {
+            if node.value_sum <= volume_cutoff {
                 for (_, order_map) in &node.orders {
                     for (_, order_tuple) in order_map {
                         if order_tuple.1 != pubkey {
@@ -41,18 +41,18 @@ where
                         }
                     }
                 }
-                target_volume = target_volume - node.value_sum;
+                volume_cutoff = volume_cutoff - node.value_sum;
             } else {
                 for (_, order_map) in &node.orders {
                     for (_, order_tuple) in order_map {
                         if order_tuple.1 != pubkey {
-                            if (order_tuple.0.s.p * order_tuple.0.s.v) <= target_volume {
+                            if (order_tuple.0.s.p * order_tuple.0.s.v) <= volume_cutoff {
                                 println!("matched order is: {:?}", order_tuple.0);
                                 matched_orders.push(order_tuple.0.clone());
-                                target_volume = target_volume - (order_tuple.0.s.v * order_tuple.0.s.p);
+                                volume_cutoff = volume_cutoff - (order_tuple.0.s.v * order_tuple.0.s.p);
                             } else {
                                 println!("matched order is: {:?}", order_tuple.0);
-                                let order_clone_volume = (target_volume
+                                let order_clone_volume = (volume_cutoff
                                     * order_tuple.0.s.p.invert().unwrap())
                                     + Fq::from(1000000000);
                                 let order_clone = Order {
@@ -64,17 +64,17 @@ where
                                     },
                                 };
                                 matched_orders.push(order_clone);
-                                target_volume = Fq::from(0);
+                                volume_cutoff = Fq::from(0);
                             }
                         }
                     }
                 }
             }
         }
-        println!("Target volume is: {:?}", target_volume);
+        println!("Target volume is: {:?}", volume_cutoff);
     }
 
-    if target_volume == Fq::from(0) {
+    if !matched_orders.is_empty() {
         Some(matched_orders)
     } else {
         None
@@ -90,8 +90,8 @@ where
     T: Ord + Clone + Debug + Copy,
 {
     let three = Fq::from(3);
-    let volume = order.s.v * order.s.p;
-    let mut target_volume = three * volume;
+    let total_volume = order.s.v * order.s.p;
+    let mut volume_cutoff = three * total_volume;
     let opposite_side = bid_tree.read().await;
 
     let bid_tree: Vec<Node<T>> = inorder_traverse(&opposite_side).await;
@@ -102,9 +102,9 @@ where
 
     for node in bid_tree.iter().rev() {
         println!("node price is: {:?}", node.price);
-        if node.price >= order.s.p && target_volume > Fq::from(0) {
+        if node.price >= order.s.p && volume_cutoff > Fq::from(0) {
             println!("node price is: {:?}", node.price);
-            if node.value_sum <= target_volume {
+            if node.value_sum <= volume_cutoff {
                 for (_, order_map) in &node.orders {
                     for (_, order_tuple) in order_map {
                         if order_tuple.1 != pubkey {
@@ -113,18 +113,18 @@ where
                         }
                     }
                 }
-                target_volume = target_volume - node.value_sum;
+                volume_cutoff = volume_cutoff - node.value_sum;
             } else {
                 for (_, order_map) in &node.orders {
                     for (_, order_tuple) in order_map {
                         if order_tuple.1 != pubkey {
-                            if (order_tuple.0.s.p * order_tuple.0.s.v) <= target_volume {
+                            if (order_tuple.0.s.p * order_tuple.0.s.v) <= volume_cutoff {
                                 println!("matched order is: {:?}", order_tuple.0);
                                 matched_orders.push(order_tuple.0.clone());
-                                target_volume = target_volume - (order_tuple.0.s.v * order_tuple.0.s.p);
+                                volume_cutoff = volume_cutoff - (order_tuple.0.s.v * order_tuple.0.s.p);
                             } else {
                                 println!("matched order is: {:?}", order_tuple.0);
-                                let order_clone_volume = (target_volume
+                                let order_clone_volume = (volume_cutoff
                                     * order_tuple.0.s.p.invert().unwrap())
                                     + Fq::from(1000000000);
                                 let order_clone = Order {
@@ -136,7 +136,7 @@ where
                                     },
                                 };
                                 matched_orders.push(order_clone);
-                                target_volume = Fq::from(0);
+                                volume_cutoff = Fq::from(0);
                             }
                         }
                     }
@@ -145,7 +145,7 @@ where
         }
     }
 
-    if target_volume == Fq::from(0) {
+    if !matched_orders.is_empty() {
         Some(matched_orders)
     } else {
         println!("No match!");
