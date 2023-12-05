@@ -30,7 +30,7 @@ where
     let mut matched_orders: Vec<Order> = Vec::new();
 
     for node in ask_tree.iter() {
-        while node.price <= order.s.p && volume_cutoff > Fq::from(0) {
+        if node.price <= order.s.p && volume_cutoff > Fq::from(0) {
             println!("node price is: {:?}", node.price);
             if node.value_sum <= volume_cutoff {
                 for (_, order_map) in &node.orders {
@@ -114,6 +114,7 @@ where
                         }
                     }
                 }
+                volume_cutoff = volume_cutoff - node.value_sum;
             } else {
                 for (_, order_map) in &node.orders {
                     for (_, order_tuple) in order_map {
