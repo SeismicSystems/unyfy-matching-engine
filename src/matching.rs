@@ -110,7 +110,6 @@ where
                         if order_tuple.1 != pubkey {
                             println!("matched order is: {:?}", order_tuple.0);
                             matched_orders.push(order_tuple.0.clone());
-                            volume_cutoff = volume_cutoff - node.value_sum;
                         }
                     }
                 }
