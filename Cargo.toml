@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# openssl = { version = "0.10", features = ["vendored"] } 
+redis = { version = "0.24.0" }
 ark-bn254 = "0.4.0"
 tokio = { version = "1.28", features = ["macros", "sync", "rt-multi-thread"] }
 tokio-stream = "0.1.14"
