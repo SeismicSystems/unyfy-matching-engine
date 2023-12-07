@@ -511,16 +511,27 @@ async fn handle_websocket_messages(
                         })
                         .collect::<Vec<Fq>>();
 
+                    let payload = json!({
+                        "action": "fillorders",
+                        "status": "success",
+                        "hash_own": json_msg["data"]["hash_own"],
+                        "hash_matched": json_msg["data"]["hash_matched"],
+                    });
+
                     if side_num == 0 {
                         bid_tree.write().await.delete_hash(hash_own).await;
                         for hash in hash_matched {
                             ask_tree.write().await.delete_hash(hash).await;
                         }
+                        let message = Message::text(payload.to_string());
+                        sender.send(message).await.unwrap();
                     } else {
                         ask_tree.write().await.delete_hash(hash_own).await;
                         for hash in hash_matched {
                             bid_tree.write().await.delete_hash(hash).await;
                         }
+                        let message = Message::text(payload.to_string());
+                        sender.send(message).await.unwrap();
                     }
                 }
             }

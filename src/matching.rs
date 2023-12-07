@@ -15,7 +15,7 @@ pub async fn match_bid<T>(
     order: Order,
     pubkey: U256,
     ask_tree: Arc<RwLock<RBTree<T>>>,
-) -> Option<Vec<(Fq,Order)>>
+) -> Option<Vec<(Fq, Order)>>
 where
     T: Ord + Clone + Debug + Copy,
 {
@@ -27,7 +27,7 @@ where
 
     let ask_tree: Vec<Node<T>> = inorder_traverse(&opposite_side).await;
 
-    let mut matched_orders: Vec<(Fq,Order)> = Vec::new();
+    let mut matched_orders: Vec<(Fq, Order)> = Vec::new();
 
     for node in ask_tree.iter() {
         if node.price <= order.s.p && volume_cutoff > Fq::from(0) {
@@ -48,8 +48,9 @@ where
                         if order_tuple.1 != pubkey {
                             if (order_tuple.0.s.p * order_tuple.0.s.v) <= volume_cutoff {
                                 println!("matched order is: {:?}", order_tuple.0);
-                                matched_orders.push((*x,order_tuple.0.clone()));
-                                volume_cutoff = volume_cutoff - (order_tuple.0.s.v * order_tuple.0.s.p);
+                                matched_orders.push((*x, order_tuple.0.clone()));
+                                volume_cutoff =
+                                    volume_cutoff - (order_tuple.0.s.v * order_tuple.0.s.p);
                             } else {
                                 println!("matched order is: {:?}", order_tuple.0);
                                 let order_clone_volume = (volume_cutoff
@@ -63,7 +64,7 @@ where
                                         alpha: order_tuple.0.s.alpha,
                                     },
                                 };
-                                matched_orders.push((*x,order_clone));
+                                matched_orders.push((*x, order_clone));
                                 volume_cutoff = Fq::from(0);
                             }
                         }
@@ -121,7 +122,8 @@ where
                             if (order_tuple.0.s.p * order_tuple.0.s.v) <= volume_cutoff {
                                 println!("matched order is: {:?}", order_tuple.0);
                                 matched_orders.push((*x, order_tuple.0.clone()));
-                                volume_cutoff = volume_cutoff - (order_tuple.0.s.v * order_tuple.0.s.p);
+                                volume_cutoff =
+                                    volume_cutoff - (order_tuple.0.s.v * order_tuple.0.s.p);
                             } else {
                                 println!("matched order is: {:?}", order_tuple.0);
                                 let order_clone_volume = (volume_cutoff

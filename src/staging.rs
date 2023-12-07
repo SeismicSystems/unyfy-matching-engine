@@ -1,6 +1,6 @@
 use crate::raw_order::{Commitment, Order};
-use std::collections::HashMap;
 use ethnum::U256;
+use std::collections::HashMap;
 pub struct StagingOrder {
     pub pubkey: U256,
     pub order: Order,
