@@ -15,7 +15,7 @@ pub async fn match_bid<T>(
     order: Order,
     pubkey: U256,
     ask_tree: Arc<RwLock<RBTree<T>>>,
-) -> Option<Vec<Order>>
+) -> Option<Vec<(Fq,Order)>>
 where
     T: Ord + Clone + Debug + Copy,
 {
@@ -27,28 +27,28 @@ where
 
     let ask_tree: Vec<Node<T>> = inorder_traverse(&opposite_side).await;
 
-    let mut matched_orders: Vec<Order> = Vec::new();
+    let mut matched_orders: Vec<(Fq,Order)> = Vec::new();
 
     for node in ask_tree.iter() {
         if node.price <= order.s.p && volume_cutoff > Fq::from(0) {
             println!("node price is: {:?}", node.price);
             if node.value_sum <= volume_cutoff {
-                for (_, order_map) in &node.orders {
-                    for (_, order_tuple) in order_map {
+                for (x, order_map) in &node.orders {
+                    for (y, order_tuple) in order_map {
                         if order_tuple.1 != pubkey {
                             println!("matched order is: {:?}", order_tuple.0);
-                            matched_orders.push(order_tuple.0.clone());
+                            matched_orders.push((*x, order_tuple.0.clone()));
                         }
                     }
                 }
                 volume_cutoff = volume_cutoff - node.value_sum;
             } else {
-                for (_, order_map) in &node.orders {
-                    for (_, order_tuple) in order_map {
+                for (x, order_map) in &node.orders {
+                    for (y, order_tuple) in order_map {
                         if order_tuple.1 != pubkey {
                             if (order_tuple.0.s.p * order_tuple.0.s.v) <= volume_cutoff {
                                 println!("matched order is: {:?}", order_tuple.0);
-                                matched_orders.push(order_tuple.0.clone());
+                                matched_orders.push((*x,order_tuple.0.clone()));
                                 volume_cutoff = volume_cutoff - (order_tuple.0.s.v * order_tuple.0.s.p);
                             } else {
                                 println!("matched order is: {:?}", order_tuple.0);
@@ -63,7 +63,7 @@ where
                                         alpha: order_tuple.0.s.alpha,
                                     },
                                 };
-                                matched_orders.push(order_clone);
+                                matched_orders.push((*x,order_clone));
                                 volume_cutoff = Fq::from(0);
                             }
                         }
@@ -85,7 +85,7 @@ pub async fn match_ask<T>(
     order: Order,
     pubkey: U256,
     bid_tree: Arc<RwLock<RBTree<T>>>,
-) -> Option<Vec<Order>>
+) -> Option<Vec<(Fq, Order)>>
 where
     T: Ord + Clone + Debug + Copy,
 {
@@ -98,29 +98,29 @@ where
 
     // println!("bid tree is: {:?}", bid_tree);
 
-    let mut matched_orders: Vec<Order> = Vec::new();
+    let mut matched_orders: Vec<(Fq, Order)> = Vec::new();
 
     for node in bid_tree.iter().rev() {
         println!("node price is: {:?}", node.price);
         if node.price >= order.s.p && volume_cutoff > Fq::from(0) {
             println!("node price is: {:?}", node.price);
             if node.value_sum <= volume_cutoff {
-                for (_, order_map) in &node.orders {
-                    for (_, order_tuple) in order_map {
+                for (x, order_map) in &node.orders {
+                    for (y, order_tuple) in order_map {
                         if order_tuple.1 != pubkey {
                             println!("matched order is: {:?}", order_tuple.0);
-                            matched_orders.push(order_tuple.0.clone());
+                            matched_orders.push((*x, order_tuple.0.clone()));
                         }
                     }
                 }
                 volume_cutoff = volume_cutoff - node.value_sum;
             } else {
-                for (_, order_map) in &node.orders {
-                    for (_, order_tuple) in order_map {
+                for (x, order_map) in &node.orders {
+                    for (y, order_tuple) in order_map {
                         if order_tuple.1 != pubkey {
                             if (order_tuple.0.s.p * order_tuple.0.s.v) <= volume_cutoff {
                                 println!("matched order is: {:?}", order_tuple.0);
-                                matched_orders.push(order_tuple.0.clone());
+                                matched_orders.push((*x, order_tuple.0.clone()));
                                 volume_cutoff = volume_cutoff - (order_tuple.0.s.v * order_tuple.0.s.p);
                             } else {
                                 println!("matched order is: {:?}", order_tuple.0);
@@ -135,7 +135,7 @@ where
                                         alpha: order_tuple.0.s.alpha,
                                     },
                                 };
-                                matched_orders.push(order_clone);
+                                matched_orders.push((*x, order_clone));
                                 volume_cutoff = Fq::from(0);
                             }
                         }
