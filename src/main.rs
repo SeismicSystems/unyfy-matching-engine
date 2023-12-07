@@ -326,7 +326,7 @@ async fn handle_websocket_messages(
 
                     let found: bool;
 
-                    let matches: Option<Vec<Order>>;
+                    let matches: Option<Vec<(Fq, Order)>>;
 
                     if side_num == 0 {
                         match bid_tree.read().await.search_exact_order(data).await {
@@ -367,8 +367,7 @@ async fn handle_websocket_messages(
                     let mut json_array = serde_json::Value::Array(Vec::new());
                     match matches {
                         Some(matches) => {
-                            for matched in matches {
-                                let hash = Fq::from_bytes(&hash_bytes).unwrap();
+                            for (matched_hash, matched) in matches {
                                 let order_json = json!({
                                     "raw_order": {
                                         "t": {
@@ -388,7 +387,7 @@ async fn handle_websocket_messages(
                                          "chi": matched.t.chi,
                                             "d": matched.t.d,
                                         },
-                                     //   "private": BigUint::from_bytes_le(&hash.to_bytes()).to_str_radix(16),
+                                     "private": BigUint::from_bytes_le(&matched_hash.to_bytes()).to_str_radix(16),
                                     },
                                 });
                                 json_array.as_array_mut().unwrap().push(order_json);
