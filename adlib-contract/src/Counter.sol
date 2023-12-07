@@ -8,7 +8,7 @@ contract Counter {
         number = newNumber;
     }
 
-    function increment() public {
+   /* function increment() public {
         number++;
-    }
+    } */
 }
