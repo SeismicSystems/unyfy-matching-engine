@@ -1,7 +1,21 @@
 use chrono::prelude::*;
+use ethers::core::types::Filter as EthersFilter;
+use ethers::core::types::H160;
+use ethers::core::types::H256;
+use ethers::core::types::U256 as EthersU256;
 use ethers::prelude::*;
 use ethers::signers::LocalWallet;
+use ethers::{
+    core::{
+        abi::AbiDecode,
+        types::{Address, BlockNumber, ValueOrArray},
+    },
+    providers::{Middleware, Provider},
+};
+use ethers_providers::Ws;
 use ethnum::U256;
+use eyre::Ok as OkEyre;
+use eyre::Result;
 use futures_util::stream::StreamExt;
 use futures_util::SinkExt;
 use halo2curves::bn256::Fr as Fq;
@@ -13,7 +27,8 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use tokio::sync::mpsc;
@@ -23,6 +38,7 @@ use unyfy_matching_engine::models::Orderbook;
 use unyfy_matching_engine::models::RBTree;
 use unyfy_matching_engine::models::*;
 use unyfy_matching_engine::raw_order::*;
+use unyfy_matching_engine::staging::*;
 use warp::ws::Message;
 use warp::ws::WebSocket;
 use warp::Reply;
@@ -108,6 +124,8 @@ async fn handle_websocket_messages(
     bid_tree: Arc<RwLock<RBTree<Fq>>>,
     ask_tree: Arc<RwLock<RBTree<Fq>>>,
     pubkey: String,
+    queue : Arc<RwLock<StagingQueue>>,
+    curr_addr: Arc<RwLock<String>>,
 ) {
     let keys = fs::read_to_string("enclave_data.txt").unwrap();
     let split: Vec<&str> = keys.split_whitespace().collect();
@@ -207,7 +225,18 @@ async fn handle_websocket_messages(
                         raw_order_commitment: commitment.clone(),
                     };
 
-                    if side_num == 0 {
+                    let staging_order = StagingOrder {
+                        pubkey: U256::from_str_hex(pubkey.as_str()).unwrap(),
+                        order: order.clone(),
+                        timestamp: SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as u32,
+                    };
+
+                    queue.write().await.add_order(staging_order, hash_value);
+
+                    /*if side_num == 0 {
                         // bid_staging_queue.write()....
                         // listen for events
                         // if (event_is_listened) { bid_staging_queue.pop()}
@@ -217,7 +246,7 @@ async fn handle_websocket_messages(
                     } else {
                         ask_tree.write().await.insert(order.s.p, data).await;
                         ask_tree.read().await.print_inorder().await;
-                    }
+                    } */
 
                     let side_return =
                         BigUint::from_bytes_le(&order.t.phi.to_bytes()).to_str_radix(10);
@@ -481,60 +510,18 @@ async fn handle_websocket_messages(
 
                     let message = Message::text(payload.to_string());
                     sender.send(message).await.unwrap();
-                } else if json_msg["action"] == "fillorders" {
-                    let side = json_msg["data"]["side"].as_str().unwrap();
-                    let side_num = side.to_string().parse::<u64>().unwrap();
-                    let hash_own_str = json_msg["data"]["hash_own"].as_str().unwrap();
-                    let hash_own_bytes = BigUint::parse_bytes(hash_own_str.as_bytes(), 16)
-                        .unwrap()
-                        .to_bytes_le();
-                    let mut hash_own_array = [0u8; 32];
-                    for (i, byte) in hash_own_bytes.iter().enumerate() {
-                        hash_own_array[i] = *byte;
-                    }
-                    let hash_own = Fq::from_bytes(&hash_own_array).unwrap();
-
-                    let hash_matched = json_msg["data"]["hash_matched"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .map(|x| {
-                            let hash_str = x.as_str().unwrap();
-                            let hash_bytes = BigUint::parse_bytes(hash_str.as_bytes(), 16)
-                                .unwrap()
-                                .to_bytes_le();
-                            let mut hash_array = [0u8; 32];
-                            for (i, byte) in hash_bytes.iter().enumerate() {
-                                hash_array[i] = *byte;
-                            }
-                            Fq::from_bytes(&hash_array).unwrap()
-                        })
-                        .collect::<Vec<Fq>>();
-
+                } else if json_msg["action"]=="upgradelisteningcontract" {
+                    let new_address = json_msg["data"]["newAddress"].as_str().unwrap();
+                    *curr_addr.write().await = new_address.to_string();
                     let payload = json!({
-                        "action": "fillorders",
+                        "action": "upgradelisteningcontract",
                         "status": "success",
-                        "hash_own": json_msg["data"]["hash_own"],
-                        "hash_matched": json_msg["data"]["hash_matched"],
+                        "newAddress": new_address,
                     });
-
-                    if side_num == 0 {
-                        bid_tree.write().await.delete_hash(hash_own).await;
-                        for hash in hash_matched {
-                            ask_tree.write().await.delete_hash(hash).await;
-                        }
-                        let message = Message::text(payload.to_string());
-                        sender.send(message).await.unwrap();
-                    } else {
-                        ask_tree.write().await.delete_hash(hash_own).await;
-                        for hash in hash_matched {
-                            bid_tree.write().await.delete_hash(hash).await;
-                        }
-                        let message = Message::text(payload.to_string());
-                        sender.send(message).await.unwrap();
-                    }
-                }
-            }
+                    let message = Message::text(payload.to_string());
+                    sender.send(message).await.unwrap();
+                } 
+}
         }
     }
 }
@@ -678,7 +665,30 @@ fn current_timestamp() -> u64 {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
+
+    abigen!(
+        AdLib,
+        r#"[
+            event orderPlaced(address indexed pubaddr, uint256 indexed orderhash)
+            event orderCancelled(address indexed pubaddr, uint256 indexed orderhash)
+            event orderDelete(uint256 orderhash)
+            event orderFilled(address indexed pubaddr, uint256 indexed orderhash, uint256[] indexed filledorderhashes)
+        ]"#,
+    );
+
+    let current_address = Arc::new(RwLock::new("0xcf7cd3acca5a467e9e704c703e8d87f634fb0fc9".to_string()));
+    let temp_address = Arc::new(RwLock::new(current_address.read().await.clone()));
+    let current_address_clone = current_address.clone();
+    let client = Provider::<Ws>::connect("ws://localhost:8545").await?;
+    let client = Arc::new(client);
+
+    let staging_queue = Arc::new(RwLock::new(StagingQueue {
+        stagingorders: HashMap::new(),
+    }));
+
+    let staging_queue_clone = staging_queue.clone();
+
     let state = Arc::new(AppState {
         challenges: Mutex::new(HashMap::new()),
     });
@@ -697,28 +707,145 @@ async fn main() {
         .and(warp::body::json())
         .and_then(handle_submit_response);
 
+   
     let orderbook = Orderbook::<Fq> {
         bid_tree: Arc::new(RwLock::new(RBTree::new())),
         ask_tree: Arc::new(RwLock::new(RBTree::new())),
     };
 
+    let bid_tree_main = orderbook.bid_tree.clone();
+    let ask_tree_main = orderbook.ask_tree.clone();
+
     let bid_tree = warp::any().map(move || orderbook.bid_tree.clone());
     let ask_tree = warp::any().map(move || orderbook.ask_tree.clone());
+    let queue = warp::any().map(move || staging_queue_clone.clone());
+    let curr_addr = warp::any().map(move || current_address.clone());
+     pretty_env_logger::init();
 
-    pretty_env_logger::init();
+        
 
     let ws_route = warp::path("ws")
         .and(warp::ws())
         .and(bid_tree)
         .and(ask_tree)
         .and(with_auth())
-        .map(|ws: warp::ws::Ws, bid_tree, ask_tree, pubkey| {
+        .and(queue)
+        .and(curr_addr)
+        .map(|ws: warp::ws::Ws, bid_tree, ask_tree, pubkey, queue, curr_addr| {
             ws.on_upgrade(move |socket| {
-                handle_websocket_messages(socket, bid_tree, ask_tree, pubkey)
+                handle_websocket_messages(socket, bid_tree, ask_tree, pubkey, queue, curr_addr)
             })
         });
 
     let routes = request_challenge.or(submit_response).or(ws_route);
 
-    warp::serve(routes).run(([0, 0, 0, 0], 8000)).await;
+
+   // warp::serve(routes).run(([0, 0, 0, 0], 8000)).await; 
+
+  
+loop {
+    println!("hi");
+     *temp_address.write().await = current_address_clone.read().await.clone();
+
+   let placed_order_event = Contract::event_of_type::<OrderPlacedFilter>(client.clone()).from_block(0).address(ValueOrArray::Value(temp_address.read().await.parse()?));
+   let cancelled_order_event = Contract::event_of_type::<OrderCancelledFilter>(client.clone()).from_block(0).address(ValueOrArray::Value(temp_address.read().await.parse()?));
+   let deleted_order_event = Contract::event_of_type::<OrderDeleteFilter>(client.clone()).from_block(0).address(ValueOrArray::Value(temp_address.read().await.parse()?));
+
+    let mut placed_order_stream = placed_order_event.subscribe_with_meta().await?.take(2);
+    let mut cancelled_order_stream = cancelled_order_event.subscribe_with_meta().await?.take(2);
+    let mut deleted_order_stream = deleted_order_event.subscribe_with_meta().await?.take(2);
+
+   
+    while let Some(Ok((log, meta))) = placed_order_stream.next().await {
+        println!("{log:?}");
+      //   println!("The pub addr is: {:?}", log.pubaddr);
+        let mut addr_bytes = [0u8; 32];
+        addr_bytes[12..].copy_from_slice(log.pubaddr.as_bytes());
+        let mut addr_str=hex::encode(addr_bytes);
+        addr_str.insert_str(0, "0x");
+       // println!("The pub addr is: {:?}", addr_str);
+        let addr_u256 = U256::from_str_hex(addr_str.as_str()).unwrap();
+       //  println!("The pub addr is: {:?}", addr_u256);
+
+       let mut orderhash_bytes = [0u8; 32];
+       log.orderhash.to_little_endian(&mut orderhash_bytes);
+       let orderhash = Fq::from_bytes(&orderhash_bytes).unwrap();
+
+       println!("The orderhash is: {:?}", orderhash);
+
+       let order = staging_queue.read().await.stagingorders.get(&addr_u256).unwrap().get(&orderhash).unwrap().order.clone();
+
+         let data = Data {
+          pubkey: addr_u256,
+          raw_order: order.clone(),
+          raw_order_commitment: Commitment {
+                public: order.t.clone(),
+                private: orderhash,
+          },
+        };
+
+        if let Some(user_orders) = staging_queue.write().await.stagingorders.get_mut(&addr_u256) {
+            user_orders.remove(&orderhash);
+            if order.t.phi == Fq::from(0u64) {
+                bid_tree_main.write().await.insert(order.s.p, data).await;
+                bid_tree_main.read().await.print_inorder().await;
+            } else {
+                ask_tree_main.write().await.insert(order.s.p, data).await;
+                ask_tree_main.read().await.print_inorder().await;
+            }
+        } else {
+            // Handle the case where there are no orders for the given user
+            println!("No orders found for the given user");
+        }
+
+   } 
+   while let Some(Ok((log, meta))) = cancelled_order_stream.next().await {
+    println!("{log:?}");
+
+   let mut orderhash_bytes = [0u8; 32];
+   log.orderhash.to_big_endian(&mut orderhash_bytes);
+   let orderhash = Fq::from_bytes(&orderhash_bytes).unwrap();
+
+   // Search for the orderhash in bid_tree_main's map and delete if found
+   if bid_tree_main.write().await.map.contains_key(&orderhash) {
+       bid_tree_main.write().await.delete_hash(orderhash).await;
+   }
+
+   else if ask_tree_main.write().await.map.contains_key(&orderhash) {
+       ask_tree_main.write().await.delete_hash(orderhash).await;
+   }
+
+   else{
+          println!("Order not found");
+   }
+
+}
+
+while let Some(Ok((log, meta))) = deleted_order_stream.next().await {
+    println!("{log:?}");
+
+
+    let mut orderhash_bytes = [0u8; 32];
+    log.orderhash.to_big_endian(&mut orderhash_bytes);
+    let orderhash = Fq::from_bytes(&orderhash_bytes).unwrap();
+
+    // Search for the orderhash in bid_tree_main's map and delete if found
+    if bid_tree_main.write().await.map.contains_key(&orderhash) {
+        bid_tree_main.write().await.delete_hash(orderhash).await;
+    }
+
+    // Search for the orderhash in ask_tree_main's map and delete if found
+    else if ask_tree_main.write().await.map.contains_key(&orderhash) {
+        ask_tree_main.write().await.delete_hash(orderhash).await;
+    }
+
+    // If the orderhash is not found in either tree, print a message
+    else {
+        println!("Order not found in either tree");
+    }
+
+} 
+
+}
+OkEyre(())
 }

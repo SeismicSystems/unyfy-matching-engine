@@ -13,7 +13,7 @@ contract AdLibTest is Test {
 
     event orderCancelled(address indexed pubaddr, uint256 indexed orderhash);
 
-    event orderGetCrossed(address indexed pubaddr, uint256 indexed orderhash);
+    event orderDelete(uint256 indexed orderhash);
 
     event orderFilled(address indexed pubaddr, uint256 indexed orderhash, uint256[] indexed filledorderhashes);
 
@@ -34,10 +34,10 @@ contract AdLibTest is Test {
         adLib.cancel(0xa1);
     }
 
-    function testGetCrossedEvent() public {
-        vm.expectEmit(true, true, false, false);
-        emit orderGetCrossed(address(this), 0xa1);
-        adLib.getCrossed(0xa1);
+    function testDeleteEvent() public {
+        vm.expectEmit(true, false, false, false);
+        emit orderDelete(0xa1);
+        adLib.deleteOrderFromTree(0xa1);
     }
 
     function testFilledEvent() public {
