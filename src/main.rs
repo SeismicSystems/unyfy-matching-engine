@@ -5,6 +5,7 @@ use ethers::core::types::H256;
 use ethers::core::types::U256 as EthersU256;
 use ethers::prelude::*;
 use ethers::signers::LocalWallet;
+use tokio::time::Duration;
 use ethers::{
     core::{
         abi::AbiDecode,
@@ -124,7 +125,7 @@ async fn handle_websocket_messages(
     bid_tree: Arc<RwLock<RBTree<Fq>>>,
     ask_tree: Arc<RwLock<RBTree<Fq>>>,
     pubkey: String,
-    queue : Arc<RwLock<StagingQueue>>,
+    queue: Arc<RwLock<StagingQueue>>,
     curr_addr: Arc<RwLock<String>>,
 ) {
     let keys = fs::read_to_string("enclave_data.txt").unwrap();
@@ -510,7 +511,7 @@ async fn handle_websocket_messages(
 
                     let message = Message::text(payload.to_string());
                     sender.send(message).await.unwrap();
-                } else if json_msg["action"]=="upgradelisteningcontract" {
+                } else if json_msg["action"] == "upgradelisteningcontract" {
                     let new_address = json_msg["data"]["newAddress"].as_str().unwrap();
                     *curr_addr.write().await = new_address.to_string();
                     let payload = json!({
@@ -520,8 +521,8 @@ async fn handle_websocket_messages(
                     });
                     let message = Message::text(payload.to_string());
                     sender.send(message).await.unwrap();
-                } 
-}
+                }
+            }
         }
     }
 }
@@ -666,20 +667,20 @@ fn current_timestamp() -> u64 {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-
     abigen!(
         AdLib,
         r#"[
             event orderPlaced(address indexed pubaddr, uint256 indexed orderhash)
             event orderCancelled(address indexed pubaddr, uint256 indexed orderhash)
-            event orderDelete(uint256 orderhash)
+            event orderDelete(uint256 indexed orderhash)
             event orderFilled(address indexed pubaddr, uint256 indexed orderhash, uint256[] indexed filledorderhashes)
         ]"#,
     );
 
-    let current_address = Arc::new(RwLock::new("0xcf7cd3acca5a467e9e704c703e8d87f634fb0fc9".to_string()));
+    let current_address = Arc::new(RwLock::new(
+        "0x5fbdb2315678afecb367f032d93f642f64180aa3".to_string(),
+    ));
     let temp_address = Arc::new(RwLock::new(current_address.read().await.clone()));
-    let current_address_clone = current_address.clone();
     let client = Provider::<Ws>::connect("ws://localhost:8545").await?;
     let client = Arc::new(client);
 
@@ -707,7 +708,6 @@ async fn main() -> Result<()> {
         .and(warp::body::json())
         .and_then(handle_submit_response);
 
-   
     let orderbook = Orderbook::<Fq> {
         bid_tree: Arc::new(RwLock::new(RBTree::new())),
         ask_tree: Arc::new(RwLock::new(RBTree::new())),
@@ -716,13 +716,208 @@ async fn main() -> Result<()> {
     let bid_tree_main = orderbook.bid_tree.clone();
     let ask_tree_main = orderbook.ask_tree.clone();
 
+    let current_address_clone = current_address.clone();
+
     let bid_tree = warp::any().map(move || orderbook.bid_tree.clone());
     let ask_tree = warp::any().map(move || orderbook.ask_tree.clone());
     let queue = warp::any().map(move || staging_queue_clone.clone());
     let curr_addr = warp::any().map(move || current_address.clone());
-     pretty_env_logger::init();
+    pretty_env_logger::init();
 
-        
+    let (tx1, mut rx1) = tokio::sync::mpsc::channel(100);
+    let (tx2, mut rx2) = tokio::sync::mpsc::channel(100);
+    let (tx3, mut rx3) = tokio::sync::mpsc::channel(100);
+
+    // Polling task
+
+let temp_address_clone = temp_address.clone();
+let tx1_clone = tx1.clone();
+let tx2_clone = tx2.clone();
+let tx3_clone = tx3.clone();
+tokio::spawn(async move {
+    loop {
+        tokio::time::sleep(Duration::from_secs(10)).await; // Check every 10 seconds
+        if *current_address_clone.read().await != *temp_address_clone.read().await {
+            // Send a message to the main task
+            let _ = tx1_clone.send(current_address_clone.read().await.to_string()).await;
+            let _ = tx2_clone.send(current_address_clone.read().await.to_string()).await;
+            let _ = tx3_clone.send(current_address_clone.read().await.to_string()).await;
+        }
+    }
+});
+
+
+    let client_clone1 = Arc::clone(&client);
+    let bid_tree_main_clone1 = bid_tree_main.clone();
+    let ask_tree_main_clone1 = ask_tree_main.clone();
+    let temp_address_clone1 = temp_address.clone();
+    tokio::spawn(async move {
+        let mut addr = temp_address_clone1.read().await.clone();
+        loop {
+            let placed_order_event = Contract::event_of_type::<OrderPlacedFilter>(client_clone1.clone())
+                .from_block(0)
+                .address(ValueOrArray::Value(addr.parse().unwrap()));
+            let mut placed_order_stream = placed_order_event
+                .subscribe_with_meta()
+                .await
+                .unwrap()
+                .take(2);
+    
+            tokio::select! {
+                // Handle new messages
+                Some(new_address) = rx1.recv() => {
+                    println!("New address is: {:?}", new_address);
+                    addr = new_address;
+                }
+                // Handle new events
+                Some(Ok((log, _meta))) = placed_order_stream.next() => {
+                    println!("{log:?}");
+            //   println!("The pub addr is: {:?}", log.pubaddr);
+            let mut addr_bytes = [0u8; 32];
+            addr_bytes[12..].copy_from_slice(log.pubaddr.as_bytes());
+            let mut addr_str = hex::encode(addr_bytes);
+            addr_str.insert_str(0, "0x");
+            // println!("The pub addr is: {:?}", addr_str);
+            let addr_u256 = U256::from_str_hex(addr_str.as_str()).unwrap();
+            //  println!("The pub addr is: {:?}", addr_u256);
+
+            let mut orderhash_bytes = [0u8; 32];
+            log.orderhash.to_little_endian(&mut orderhash_bytes);
+            let orderhash = Fq::from_bytes(&orderhash_bytes).unwrap();
+
+            println!("The orderhash is: {:?}", orderhash);
+
+            let order = staging_queue
+                .read()
+                .await
+                .stagingorders
+                .get(&addr_u256)
+                .unwrap()
+                .get(&orderhash)
+                .unwrap()
+                .order
+                .clone();
+
+            let data = Data {
+                pubkey: addr_u256,
+                raw_order: order.clone(),
+                raw_order_commitment: Commitment {
+                    public: order.t.clone(),
+                    private: orderhash,
+                },
+            };
+
+            if let Some(user_orders) = staging_queue
+                .write()
+                .await
+                .stagingorders
+                .get_mut(&addr_u256)
+            {
+                user_orders.remove(&orderhash);
+                if order.t.phi == Fq::from(0u64) {
+                    bid_tree_main_clone1.write().await.insert(order.s.p, data).await;
+                    bid_tree_main_clone1.read().await.print_inorder().await;
+                } else {
+                    ask_tree_main_clone1.write().await.insert(order.s.p, data).await;
+                    ask_tree_main_clone1.read().await.print_inorder().await;
+                }
+            } else {
+                // Handle the case where there are no orders for the given user
+                println!("No orders found for the given user");
+            }
+                }
+            }
+        }
+    });
+
+    let client_clone2 = Arc::clone(&client);
+    let bid_tree_main_clone2 = bid_tree_main.clone();
+    let ask_tree_main_clone2 = ask_tree_main.clone();
+    let temp_address_clone2 = temp_address.clone();
+    tokio::spawn(async move {
+        let mut addr = temp_address_clone2.read().await.clone();
+    loop {
+        let cancelled_order_event = Contract::event_of_type::<OrderCancelledFilter>(client_clone2.clone())
+            .from_block(0)
+            .address(ValueOrArray::Value(addr.parse().unwrap()));
+        let mut cancelled_order_stream = cancelled_order_event
+            .subscribe_with_meta()
+            .await
+            .unwrap()
+            .take(2);
+        tokio::select! {
+            // Handle new messages
+            Some(new_address) = rx2.recv() => {
+                println!("New address is: {:?}", new_address);
+                addr = new_address;
+            }
+            // Handle new events
+            Some(Ok((log, _meta))) = cancelled_order_stream.next() => {
+                println!("{log:?}");
+
+                let mut orderhash_bytes = [0u8; 32];
+                log.orderhash.to_little_endian(&mut orderhash_bytes);
+                let orderhash = Fq::from_bytes(&orderhash_bytes).unwrap();
+
+                // Search for the orderhash in bid_tree_main's map and delete if found
+                if bid_tree_main_clone2.write().await.map.contains_key(&orderhash) {
+                    bid_tree_main_clone2.write().await.delete_hash(orderhash).await;
+                } else if ask_tree_main_clone2.write().await.map.contains_key(&orderhash) {
+                    ask_tree_main_clone2.write().await.delete_hash(orderhash).await;
+                } else {
+                    println!("Order not found");
+                }
+            }
+        }
+    }
+});
+   
+    let client_clone3 = Arc::clone(&client);
+    let bid_tree_main_clone3 = bid_tree_main.clone();
+    let ask_tree_main_clone3 = ask_tree_main.clone();
+    let temp_address_clone3 = temp_address.clone();
+
+    tokio::spawn(async move {
+        let mut addr = temp_address_clone3.read().await.clone();
+        loop {
+            let deleted_order_event = Contract::event_of_type::<OrderDeleteFilter>(client_clone3.clone())
+                .from_block(0)
+                .address(ValueOrArray::Value(addr.parse().unwrap()));
+            let mut deleted_order_stream = deleted_order_event
+                .subscribe_with_meta()
+                .await
+                .unwrap()
+                .take(2);
+            tokio::select! {
+                // Handle new messages
+                Some(new_address) = rx3.recv() => {
+                    println!("New address is: {:?}", new_address);
+                    addr = new_address;
+                }
+                // Handle new events
+                Some(Ok((log, _meta))) = deleted_order_stream.next() => {
+                    println!("{log:?}");
+
+                    let mut orderhash_bytes = [0u8; 32];
+                    log.orderhash.to_little_endian(&mut orderhash_bytes);
+                    let orderhash = Fq::from_bytes(&orderhash_bytes).unwrap();
+
+                    // Search for the orderhash in bid_tree_main's map and delete if found
+                    if bid_tree_main_clone3.write().await.map.contains_key(&orderhash) {
+                        bid_tree_main_clone3.write().await.delete_hash(orderhash).await;
+                    }
+                    // Search for the orderhash in ask_tree_main's map and delete if found
+                    else if ask_tree_main_clone3.write().await.map.contains_key(&orderhash) {
+                        ask_tree_main_clone3.write().await.delete_hash(orderhash).await;
+                    }
+                    // If the orderhash is not found in either tree, print a message
+                    else {
+                        println!("Order not found in either tree");
+                    }
+                }
+            }
+        }
+    });
 
     let ws_route = warp::path("ws")
         .and(warp::ws())
@@ -731,121 +926,17 @@ async fn main() -> Result<()> {
         .and(with_auth())
         .and(queue)
         .and(curr_addr)
-        .map(|ws: warp::ws::Ws, bid_tree, ask_tree, pubkey, queue, curr_addr| {
-            ws.on_upgrade(move |socket| {
-                handle_websocket_messages(socket, bid_tree, ask_tree, pubkey, queue, curr_addr)
-            })
-        });
+        .map(
+            |ws: warp::ws::Ws, bid_tree, ask_tree, pubkey, queue, curr_addr| {
+                ws.on_upgrade(move |socket| {
+                    handle_websocket_messages(socket, bid_tree, ask_tree, pubkey, queue, curr_addr)
+                })
+            },
+        );
 
     let routes = request_challenge.or(submit_response).or(ws_route);
 
+    warp::serve(routes).run(([0, 0, 0, 0], 8000)).await;
 
-   // warp::serve(routes).run(([0, 0, 0, 0], 8000)).await; 
-
-  
-loop {
-    println!("hi");
-     *temp_address.write().await = current_address_clone.read().await.clone();
-
-   let placed_order_event = Contract::event_of_type::<OrderPlacedFilter>(client.clone()).from_block(0).address(ValueOrArray::Value(temp_address.read().await.parse()?));
-   let cancelled_order_event = Contract::event_of_type::<OrderCancelledFilter>(client.clone()).from_block(0).address(ValueOrArray::Value(temp_address.read().await.parse()?));
-   let deleted_order_event = Contract::event_of_type::<OrderDeleteFilter>(client.clone()).from_block(0).address(ValueOrArray::Value(temp_address.read().await.parse()?));
-
-    let mut placed_order_stream = placed_order_event.subscribe_with_meta().await?.take(2);
-    let mut cancelled_order_stream = cancelled_order_event.subscribe_with_meta().await?.take(2);
-    let mut deleted_order_stream = deleted_order_event.subscribe_with_meta().await?.take(2);
-
-   
-    while let Some(Ok((log, meta))) = placed_order_stream.next().await {
-        println!("{log:?}");
-      //   println!("The pub addr is: {:?}", log.pubaddr);
-        let mut addr_bytes = [0u8; 32];
-        addr_bytes[12..].copy_from_slice(log.pubaddr.as_bytes());
-        let mut addr_str=hex::encode(addr_bytes);
-        addr_str.insert_str(0, "0x");
-       // println!("The pub addr is: {:?}", addr_str);
-        let addr_u256 = U256::from_str_hex(addr_str.as_str()).unwrap();
-       //  println!("The pub addr is: {:?}", addr_u256);
-
-       let mut orderhash_bytes = [0u8; 32];
-       log.orderhash.to_little_endian(&mut orderhash_bytes);
-       let orderhash = Fq::from_bytes(&orderhash_bytes).unwrap();
-
-       println!("The orderhash is: {:?}", orderhash);
-
-       let order = staging_queue.read().await.stagingorders.get(&addr_u256).unwrap().get(&orderhash).unwrap().order.clone();
-
-         let data = Data {
-          pubkey: addr_u256,
-          raw_order: order.clone(),
-          raw_order_commitment: Commitment {
-                public: order.t.clone(),
-                private: orderhash,
-          },
-        };
-
-        if let Some(user_orders) = staging_queue.write().await.stagingorders.get_mut(&addr_u256) {
-            user_orders.remove(&orderhash);
-            if order.t.phi == Fq::from(0u64) {
-                bid_tree_main.write().await.insert(order.s.p, data).await;
-                bid_tree_main.read().await.print_inorder().await;
-            } else {
-                ask_tree_main.write().await.insert(order.s.p, data).await;
-                ask_tree_main.read().await.print_inorder().await;
-            }
-        } else {
-            // Handle the case where there are no orders for the given user
-            println!("No orders found for the given user");
-        }
-
-   } 
-   while let Some(Ok((log, meta))) = cancelled_order_stream.next().await {
-    println!("{log:?}");
-
-   let mut orderhash_bytes = [0u8; 32];
-   log.orderhash.to_big_endian(&mut orderhash_bytes);
-   let orderhash = Fq::from_bytes(&orderhash_bytes).unwrap();
-
-   // Search for the orderhash in bid_tree_main's map and delete if found
-   if bid_tree_main.write().await.map.contains_key(&orderhash) {
-       bid_tree_main.write().await.delete_hash(orderhash).await;
-   }
-
-   else if ask_tree_main.write().await.map.contains_key(&orderhash) {
-       ask_tree_main.write().await.delete_hash(orderhash).await;
-   }
-
-   else{
-          println!("Order not found");
-   }
-
-}
-
-while let Some(Ok((log, meta))) = deleted_order_stream.next().await {
-    println!("{log:?}");
-
-
-    let mut orderhash_bytes = [0u8; 32];
-    log.orderhash.to_big_endian(&mut orderhash_bytes);
-    let orderhash = Fq::from_bytes(&orderhash_bytes).unwrap();
-
-    // Search for the orderhash in bid_tree_main's map and delete if found
-    if bid_tree_main.write().await.map.contains_key(&orderhash) {
-        bid_tree_main.write().await.delete_hash(orderhash).await;
-    }
-
-    // Search for the orderhash in ask_tree_main's map and delete if found
-    else if ask_tree_main.write().await.map.contains_key(&orderhash) {
-        ask_tree_main.write().await.delete_hash(orderhash).await;
-    }
-
-    // If the orderhash is not found in either tree, print a message
-    else {
-        println!("Order not found in either tree");
-    }
-
-} 
-
-}
-OkEyre(())
+    OkEyre(())
 }

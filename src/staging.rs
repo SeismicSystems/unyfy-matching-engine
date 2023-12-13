@@ -2,12 +2,15 @@ use crate::raw_order::{Commitment, Order};
 use ethnum::U256;
 use halo2curves::bn256::Fr as Fq;
 use std::collections::HashMap;
+
+#[derive(Debug)]
 pub struct StagingOrder {
     pub pubkey: U256,
     pub order: Order,
     pub timestamp: u32,
 }
 
+#[derive(Debug)]
 pub struct StagingQueue {
     pub stagingorders: HashMap<U256, HashMap<Fq, StagingOrder>>,
 }
