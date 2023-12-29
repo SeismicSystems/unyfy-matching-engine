@@ -678,7 +678,7 @@ async fn main() -> Result<()> {
     );
 
     let current_address = Arc::new(RwLock::new(
-        "0x5fbdb2315678afecb367f032d93f642f64180aa3".to_string(),
+        "0x3C3EF8652c104f57acd42D077F060cf00cFc53B5".to_string(),
     ));
     let temp_address = Arc::new(RwLock::new(current_address.read().await.clone()));
     let client = Provider::<Ws>::connect("wss://ethereum-sepolia.publicnode.com").await?;
@@ -725,13 +725,16 @@ async fn main() -> Result<()> {
     pretty_env_logger::init();
 
     let placed_order_event =
-        Contract::event_of_type::<OrderPlacedFilter>(client.clone()).from_block(0);
+        Contract::event_of_type::<OrderPlacedFilter>(client.clone()).from_block(4980382
+        ).address(ValueOrArray::Value(("0x3C3EF8652c104f57acd42D077F060cf00cFc53B5".parse::<H160>().unwrap()).into()));
 
     let cancelled_order_event =
-        Contract::event_of_type::<OrderCancelledFilter>(client.clone()).from_block(0);
+        Contract::event_of_type::<OrderCancelledFilter>(client.clone()).from_block(4980382
+        ).address(ValueOrArray::Value(("0x3C3EF8652c104f57acd42D077F060cf00cFc53B5".parse::<H160>().unwrap()).into()));
 
     let deleted_order_event =
-        Contract::event_of_type::<OrderDeleteFilter>(client.clone()).from_block(0);
+        Contract::event_of_type::<OrderDeleteFilter>(client.clone()).from_block(4980382
+        ).address(ValueOrArray::Value(("0x3C3EF8652c104f57acd42D077F060cf00cFc53B5".parse::<H160>().unwrap()).into()));
 
     let placed_order_event = Arc::new(placed_order_event);
     let cancelled_order_event = Arc::new(cancelled_order_event);
