@@ -2,9 +2,9 @@
 
 pragma solidity ^0.8.13;
 
-import {IPlaceVerifier} from "../interfaces/IPlaceVerifier.sol";
-import {ICancelVerifier} from "../interfaces/ICancelVerifier.sol";
-import {IFillVerifier} from "../interfaces/IFillVerifier.sol";
+import {IPlaceVerifier} from "./interfaces/IPlaceVerifier.sol";
+import {ICancelVerifier} from "./interfaces/ICancelVerifier.sol";
+import {IFillVerifier} from "./interfaces/IFillVerifier.sol";
 
 contract UnyfyDev {
 
