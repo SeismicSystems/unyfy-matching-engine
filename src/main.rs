@@ -370,15 +370,15 @@ async fn handle_websocket_messages(
                         }
 
                         if found {
-                            matches = Some(
-                                match_bid(
-                                    order.clone(),
-                                    U256::from_str_hex(pubkey.as_str()).unwrap(),
-                                    ask_tree.clone(),
-                                )
-                                .await
-                                .unwrap(),
-                            );
+                            matches = match match_bid(
+                                order.clone(),
+                                U256::from_str_hex(pubkey.as_str()).unwrap(),
+                                ask_tree.clone(),
+                            )
+                            .await {
+                                Some(result) => Some(result),
+                                None => None,
+                            };
                         } else {
                             matches = None
                         }
@@ -686,7 +686,7 @@ async fn main() -> Result<()> {
         "0x3C3EF8652c104f57acd42D077F060cf00cFc53B5".to_string(),
     ));
     let temp_address = Arc::new(RwLock::new(current_address.read().await.clone()));
-    let client = Provider::<Ws>::connect("wss://sepolia.infura.io/ws/v3/<API KEY>").await?;
+    let client = Provider::<Ws>::connect("wss://sepolia.infura.io/ws/v3/<API_KEY>").await?;
     let client = Arc::new(client);
 
     let staging_queue = Arc::new(RwLock::new(StagingQueue {
@@ -729,8 +729,10 @@ async fn main() -> Result<()> {
     let curr_addr = warp::any().map(move || current_address.clone());
     pretty_env_logger::init();
 
+    let latest_block_number = client.get_block(BlockNumber::Latest).await?.unwrap().number.unwrap();
+
     let placed_order_event = Contract::event_of_type::<OrderPlacedFilter>(client.clone())
-        .from_block(4994796)
+        .from_block(latest_block_number)
         .address(ValueOrArray::Value(
             ("0x3C3EF8652c104f57acd42D077F060cf00cFc53B5"
                 .parse::<H160>()
@@ -739,7 +741,7 @@ async fn main() -> Result<()> {
         ));
 
     let cancelled_order_event = Contract::event_of_type::<OrderCancelledFilter>(client.clone())
-        .from_block(4994796)
+        .from_block(latest_block_number)
         .address(ValueOrArray::Value(
             ("0x3C3EF8652c104f57acd42D077F060cf00cFc53B5"
                 .parse::<H160>()
@@ -748,7 +750,7 @@ async fn main() -> Result<()> {
         ));
 
     let deleted_order_event = Contract::event_of_type::<OrderDeleteFilter>(client.clone())
-        .from_block(4994796)
+        .from_block(latest_block_number)
         .address(ValueOrArray::Value(
             ("0x3C3EF8652c104f57acd42D077F060cf00cFc53B5"
                 .parse::<H160>()
