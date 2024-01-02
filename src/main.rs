@@ -375,7 +375,8 @@ async fn handle_websocket_messages(
                                 U256::from_str_hex(pubkey.as_str()).unwrap(),
                                 ask_tree.clone(),
                             )
-                            .await {
+                            .await
+                            {
                                 Some(result) => Some(result),
                                 None => None,
                             };
@@ -729,7 +730,12 @@ async fn main() -> Result<()> {
     let curr_addr = warp::any().map(move || current_address.clone());
     pretty_env_logger::init();
 
-    let latest_block_number = client.get_block(BlockNumber::Latest).await?.unwrap().number.unwrap();
+    let latest_block_number = client
+        .get_block(BlockNumber::Latest)
+        .await?
+        .unwrap()
+        .number
+        .unwrap();
 
     let placed_order_event = Contract::event_of_type::<OrderPlacedFilter>(client.clone())
         .from_block(latest_block_number)
