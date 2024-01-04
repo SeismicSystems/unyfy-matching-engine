@@ -1,0 +1,34 @@
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local
+    ports:
+      - 8001:8000
+
+  server:
+    restart: always
+    build:
+      context: .
+      target: final
+    ports:
+      - 8000:8000
+    environment:
+      - DYNAMODB_ENDPOINT=http://dynamodb:8000
+      - AWS_ACCESS_KEY_ID = 123
+      - AWS_SECRET_ACCESS_KEY = 123
+    depends_on:
+      - dynamodb
+      - cache
+
+
+  cache:
+    image: redis:6.2-alpine
+    restart: always
+    ports:
+      - 6379:6379
+    command: redis-server --save 20 1 --loglevel warning --requirepass eYVX7EwVmmxKPCDmwMtyKVge8oLd2t81
+    volumes: 
+      - cache:/data
+volumes:
+  cache:
+    driver: local
