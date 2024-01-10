@@ -32,6 +32,7 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex as TokioMutex;
 use tokio::sync::RwLock;
 use tokio::time::Duration;
 use unyfy_matching_engine::matching::*;
@@ -118,6 +119,8 @@ async fn clear_orderbook<T: Ord + Debug + Copy>(tree: &Arc<RwLock<RBTree<T>>>) {
     let mut tree = tree.write().await;
     tree.root = None;
     tree.count = 0;
+    tree.map.clear();
+    tree.key_hash_map.clear();
 }
 
 async fn handle_websocket_messages(
@@ -125,7 +128,7 @@ async fn handle_websocket_messages(
     bid_tree: Arc<RwLock<RBTree<Fq>>>,
     ask_tree: Arc<RwLock<RBTree<Fq>>>,
     pubkey: String,
-    queue: Arc<RwLock<StagingQueue>>,
+    queue: Arc<TokioMutex<StagingQueue>>,
     curr_addr: Arc<RwLock<String>>,
 ) {
     let keys = fs::read_to_string("enclave_data.txt").unwrap();
@@ -238,7 +241,8 @@ async fn handle_websocket_messages(
                             .as_secs() as u32,
                     };
 
-                    queue.write().await.add_order(staging_order, hash_value);
+                    queue.lock().await.add_order(staging_order, hash_value);
+                    println!("Order added to staging queue!");
 
                     /*if side_num == 0 {
                         // bid_staging_queue.write()....
@@ -684,17 +688,18 @@ async fn main() -> Result<()> {
     );
 
     let current_address = Arc::new(RwLock::new(
-        "0x3C3EF8652c104f57acd42D077F060cf00cFc53B5".to_string(),
+        "0xC1188b01D9b7B72559C7D28Cf68f707e5c383621".to_string(),
     ));
     let temp_address = Arc::new(RwLock::new(current_address.read().await.clone()));
     let client = Provider::<Ws>::connect("wss://sepolia.infura.io/ws/v3/<API_KEY>").await?;
+    // let client = Provider::<Ws>::connect("ws://localhost:8545").await?;
     let client = Arc::new(client);
 
-    let staging_queue = Arc::new(RwLock::new(StagingQueue {
+    let staging_queue = Arc::new(TokioMutex::new(StagingQueue {
         stagingorders: HashMap::new(),
     }));
 
-    let staging_queue_clone = staging_queue.clone();
+    let staging_queue_main = staging_queue.clone();
 
     let state = Arc::new(AppState {
         challenges: Mutex::new(HashMap::new()),
@@ -726,7 +731,7 @@ async fn main() -> Result<()> {
 
     let bid_tree = warp::any().map(move || orderbook.bid_tree.clone());
     let ask_tree = warp::any().map(move || orderbook.ask_tree.clone());
-    let queue = warp::any().map(move || staging_queue_clone.clone());
+    let queue = warp::any().map(move || staging_queue.clone());
     let curr_addr = warp::any().map(move || current_address.clone());
     pretty_env_logger::init();
 
@@ -737,10 +742,12 @@ async fn main() -> Result<()> {
         .number
         .unwrap();
 
+    println!("Latest block number is: {}", latest_block_number);
+
     let placed_order_event = Contract::event_of_type::<OrderPlacedFilter>(client.clone())
         .from_block(latest_block_number)
         .address(ValueOrArray::Value(
-            ("0x3C3EF8652c104f57acd42D077F060cf00cFc53B5"
+            ("0xC1188b01D9b7B72559C7D28Cf68f707e5c383621"
                 .parse::<H160>()
                 .unwrap())
             .into(),
@@ -749,7 +756,7 @@ async fn main() -> Result<()> {
     let cancelled_order_event = Contract::event_of_type::<OrderCancelledFilter>(client.clone())
         .from_block(latest_block_number)
         .address(ValueOrArray::Value(
-            ("0x3C3EF8652c104f57acd42D077F060cf00cFc53B5"
+            ("0xC1188b01D9b7B72559C7D28Cf68f707e5c383621"
                 .parse::<H160>()
                 .unwrap())
             .into(),
@@ -758,7 +765,7 @@ async fn main() -> Result<()> {
     let deleted_order_event = Contract::event_of_type::<OrderDeleteFilter>(client.clone())
         .from_block(latest_block_number)
         .address(ValueOrArray::Value(
-            ("0x3C3EF8652c104f57acd42D077F060cf00cFc53B5"
+            ("0xC1188b01D9b7B72559C7D28Cf68f707e5c383621"
                 .parse::<H160>()
                 .unwrap())
             .into(),
@@ -774,6 +781,9 @@ async fn main() -> Result<()> {
 
     let bid_tree_main_clone1 = bid_tree_main.clone();
     let ask_tree_main_clone1 = ask_tree_main.clone();
+
+    let staging_queue_main_clone1 = staging_queue_main.clone();
+
     tokio::spawn(async move {
         let mut placed_order_stream = placed_order_event_clone
             .subscribe_with_meta()
@@ -796,8 +806,8 @@ async fn main() -> Result<()> {
                     // Handle placed order event
                     let bid_tree_main_clone1_2 = bid_tree_main_clone1.clone();
                     let ask_tree_main_clone1_2 = ask_tree_main_clone1.clone();
-                    let staging_queue = staging_queue.clone();
-                    tokio::spawn(async move {
+                   let staging_queue_main_clone1_1 = staging_queue_main_clone1.clone();
+                   tokio::spawn(async move {
                     println!("Placed order event: {:?}", log);
                     //   println!("The pub addr is: {:?}", log.pubaddr);
                      let mut addr_bytes = [0u8; 32];
@@ -814,7 +824,10 @@ async fn main() -> Result<()> {
 
                     println!("The converted orderhash is: {:?}", orderhash);
 
-                    let staging_queue_read = staging_queue.read().await;
+                    let mut staging_queue_read = staging_queue_main_clone1_1.lock().await;
+
+                    println!("Reached here!!!");
+
                     let order_option = staging_queue_read.stagingorders.get(&addr_u256);
 
                     let order_found_1 = match order_option {
@@ -828,6 +841,7 @@ async fn main() -> Result<()> {
 
                     match order_found_1 {
                         Some(x) => {
+                            println!("Order found in user_orders");
                             let data = Data {
                                 pubkey: addr_u256,
                                 raw_order: x.order.clone(),
@@ -851,9 +865,7 @@ async fn main() -> Result<()> {
                         }
                     };
 
-                    if let Some(user_orders) = staging_queue
-                        .write()
-                        .await
+                    if let Some(user_orders) = staging_queue_read
                         .stagingorders
                         .get_mut(&addr_u256)
                     {
@@ -869,6 +881,7 @@ async fn main() -> Result<()> {
                         // Handle the case where there are no orders for the given user
                         println!("No orders found for the given user");
                     }
+                    drop(staging_queue_read);
                 });
                 }
                 Some(Ok((log, _meta))) = cancelled_order_stream.next() => {
@@ -876,7 +889,7 @@ async fn main() -> Result<()> {
                     println!("{log:?}");
                     let bid_tree_main_clone1_3 = bid_tree_main_clone1.clone();
                     let ask_tree_main_clone1_3 = ask_tree_main_clone1.clone();
-                    tokio::spawn(async move {
+                  //  tokio::spawn(async move {
                     let mut orderhash_bytes = [0u8; 32];
                     log.orderhash.to_little_endian(&mut orderhash_bytes);
                     let orderhash = Fq::from_bytes(&orderhash_bytes).unwrap();
@@ -889,7 +902,7 @@ async fn main() -> Result<()> {
                     } else {
                         println!("Order not found");
                     }
-                });
+                // });
                 }
 
                 Some(Ok((log, _meta))) = deleted_order_stream.next() => {
@@ -899,7 +912,7 @@ async fn main() -> Result<()> {
 
                     let bid_tree_main_clone1_4 = bid_tree_main_clone1.clone();
                     let ask_tree_main_clone1_4 = ask_tree_main_clone1.clone();
-                    tokio::spawn(async move {
+                    //tokio::spawn(async move {
                     let mut orderhash_bytes = [0u8; 32];
                     log.orderhash.to_little_endian(&mut orderhash_bytes);
                     let orderhash = Fq::from_bytes(&orderhash_bytes).unwrap();
@@ -916,7 +929,7 @@ async fn main() -> Result<()> {
                     else {
                         println!("Order not found in either tree");
                     }
-                });
+                // });
                 }
                 else => {
                     break;
