@@ -76,6 +76,8 @@ where
     }
 
     if !matched_orders.is_empty() {
+        matched_orders.sort_by(|a, b| a.0.cmp(&b.0));
+        matched_orders.dedup_by(|a, b| a.0 == b.0);
         Some(matched_orders)
     } else {
         None
